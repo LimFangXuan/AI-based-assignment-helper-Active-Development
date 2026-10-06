@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}已提交 - 作业效率助手{% endblock %}
+{% block content %}
+<h1>已提交的作业</h1>
+<div class="card">
+  {% for p in projects %}
+    <div class="project-row">
+      <i class="bullet submitted"></i>
+      <a class="name" href="{{ url_for('project_detail', project_id=p.id) }}">{{ p.name }}</a>
+      <span class="muted">截止 {{ p.deadline.strftime('%Y-%m-%d %H:%M') }}</span>
+    </div>
+  {% else %}
+    <div class="empty">还没有已提交的作业。</div>
+  {% endfor %}
+</div>
+{% endblock %}

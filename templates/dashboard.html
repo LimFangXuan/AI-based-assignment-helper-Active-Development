@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="header-row">
+  <h1>我的作业</h1>
+  <a class="btn" href="{{ url_for('new_project') }}">+ 创建项目</a>
+</div>
+<div class="card">
+  <div class="legend">
+    <span><i class="bullet not_started"></i>未开始</span>
+    <span><i class="bullet in_progress"></i>进行中</span>
+    <span><i class="bullet done"></i>已完成（未提交）</span>
+  </div>
+  {% for p in projects %}
+    <div class="project-row">
+      <i class="bullet {{ p.status }}" title="{{ STATUS_LABELS[p.status] }}"></i>
+      <a class="name" href="{{ url_for('project_detail', project_id=p.id) }}">{{ p.name }}</a>
+      <span class="muted {% if p.deadline < now and p.status != 'done' %}overdue{% endif %}">
+        {% if p.deadline < now and p.status != 'done' %}已逾期 · {% endif %}截止 {{ p.deadline.strftime('%Y-%m-%d %H:%M') }}
+      </span>
+    </div>
+  {% else %}
+    <div class="empty">还没有待完成的作业。<br><a href="{{ url_for('new_project') }}">创建第一个项目</a></div>
+  {% endfor %}
+</div>
+{% endblock %}

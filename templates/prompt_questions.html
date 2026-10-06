@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}澄清问题 - 作业效率助手{% endblock %}
+{% block content %}
+{% set current = 1 %}{% include "_stepper.html" %}
+<h1>先弄清楚几件事</h1>
+<p class="muted">项目：{{ project.name }}。选一个选项，或者在下面手写；不确定就选“不知道”，AI 会给出推荐做法并标注为[推荐]。</p>
+{% include "_diagnosis.html" %}
+<form method="POST" action="{{ url_for('prompt_answers', project_id=project.id, session_id=ps.id) }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="card">
+    {% for q in ps.questions %}
+      {% set i = loop.index0 %}
+      <div class="question">
+        <strong>{{ loop.index }}. {{ q.question }}</strong>
+        {% if q.why %}<div class="why">为什么问：{{ q.why }}</div>{% endif %}
+        {% for opt in q.options %}
+          <label class="option">
+            <input type="radio" name="q{{ i }}" value="{{ opt }}"> {{ opt }}
+          </label>
+        {% endfor %}
+        <input type="text" name="q{{ i }}_text" maxlength="500" placeholder="或者手写你的回答（填了会优先使用）"
+               style="margin-top:8px;">
+      </div>
+    {% endfor %}
+  </div>
+  <button class="btn" type="submit">提交回答，让 AI 整理</button>
+  <span class="muted">（AI 整理需要几秒钟）</span>
+</form>
+<p><a href="{{ url_for('project_detail', project_id=project.id) }}">← 返回项目</a></p>
+{% endblock %}

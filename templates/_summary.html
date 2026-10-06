@@ -1,0 +1,67 @@
+{# 摘要 + 为这个项目定制的设计：确认页、拦截页、结果页共用。需要变量 s（摘要） #}
+<div class="card">
+  <h2>[已确认] 我对你的项目的理解</h2>
+  <p><strong>目标：</strong>{{ s.goal or '（未明确）' }}</p>
+  <strong>交付物</strong>
+  <ul class="plain">{% for x in s.deliverables %}<li>{{ x }}</li>{% else %}<li class="muted">未明确</li>{% endfor %}</ul>
+  <strong>范围：要做</strong>
+  <ul class="plain">{% for x in s.scope_in %}<li>{{ x }}</li>{% else %}<li class="muted">未明确</li>{% endfor %}</ul>
+  <strong>范围：不做</strong>
+  <ul class="plain">{% for x in s.scope_out %}<li>{{ x }}</li>{% else %}<li class="muted">未明确</li>{% endfor %}</ul>
+  <strong>约束条件</strong>
+  <ul class="plain">{% for x in s.constraints %}<li>{{ x }}</li>{% else %}<li class="muted">未明确</li>{% endfor %}</ul>
+  <strong>[推荐] 你回答“不知道”的地方，AI 建议这样做（尚未确认）</strong>
+  <ul class="plain">
+    {% for r in s.recommendations or [] %}
+      <li>{{ r.text }}<br><span class="muted">理由：{{ r.reason or '无' }}</span></li>
+    {% else %}<li class="muted">没有</li>{% endfor %}
+  </ul>
+  <strong>⚠ [假设] AI 推断的内容，请检查是否正确</strong>
+  <ul class="plain">
+    {% for a in s.assumptions %}
+      <li>{{ a.text }}<br><span class="muted">依据：{{ a.reason or '无' }}；若错误：{{ a.if_wrong or '未说明' }}</span></li>
+    {% else %}<li class="muted">没有假设</li>{% endfor %}
+  </ul>
+</div>
+
+{% if s.design %}
+<div class="card">
+  <h2>为你的项目定制的 Prompt 设计</h2>
+  {% if s.design.source != 'ai' %}
+    <div class="notice">AI 这次没能生成合格的定制设计，暂时使用了通用模板。你可以在下面写下修改意见（例如“我要准备面试，请让 AI 扮演面试官”）再重新生成。</div>
+  {% endif %}
+  <strong>AI 将扮演</strong>
+  <div class="design-role">{{ s.design.ai_role }}</div>
+  <strong>语言</strong>
+  <ul class="plain"><li>{{ s.design.language_policy or '使用和我的描述相同的语言回答。' }}</li></ul>
+  <strong>互动方式</strong>
+  <ul class="plain">{% for m in s.design.interaction_mode %}<li>{{ m }}</li>{% endfor %}</ul>
+  {% if s.design.success_criteria %}
+    <strong>成功标准（相当于评分标准）</strong>
+    <ol style="margin:6px 0 14px;">{% for m in s.design.success_criteria %}<li>{{ m }}</li>{% endfor %}</ol>
+  {% endif %}
+  {% if s.design.feedback_format %}
+    <strong>反馈格式</strong>
+    <ul class="plain">{% for m in s.design.feedback_format %}<li>{{ m }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if s.design.controls %}
+    <strong>控制指令</strong>
+    <ul class="plain">{% for m in s.design.controls %}<li>{{ m }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if s.design.pre_checks %}
+    <strong>开始前 AI 会先做的分析</strong>
+    <ul class="plain">{% for m in s.design.pre_checks %}<li>{{ m }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if s.design.fill_in %}
+    <div class="notice">生成后发送前，请在 prompt 里补填：{{ s.design.fill_in | join('、') }}</div>
+  {% endif %}
+  {% if s.design.special_instructions %}
+    <strong>你提出的特殊要求</strong>
+    <ul class="plain">{% for m in s.design.special_instructions %}<li>{{ m }}</li>{% endfor %}</ul>
+  {% endif %}
+  <strong>六个步骤</strong>
+  {% for st in s.design.steps %}
+    <div class="step-item"><strong>{{ loop.index }}. {{ st.name }}</strong><br><span class="muted">{{ st.instruction }}</span></div>
+  {% endfor %}
+</div>
+{% endif %}

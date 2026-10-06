@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} - 作业效率助手{% endblock %}
+{% block content %}
+<div class="header-row">
+  <h1><i class="bullet {{ project.status }}"></i> {{ project.name }}</h1>
+  <form method="POST" action="{{ url_for('submit_project', project_id=project.id) }}"
+        onsubmit="return confirm('确认已提交？提交后它会从 Dashboard 消失，可以在“已提交”页面查看。');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button class="btn success" type="submit">已提交</button>
+  </form>
+</div>
+
+<div class="card">
+  <p class="muted {% if project.deadline < now and project.status != 'done' %}overdue{% endif %}">
+    截止 {{ project.deadline.strftime('%Y-%m-%d %H:%M') }}
+    {% if project.deadline < now and project.status != 'done' %}（已逾期）{% endif %}
+  </p>
+  <form method="POST" action="{{ url_for('update_status', project_id=project.id) }}"
+        style="display:flex;gap:10px;align-items:center;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label for="status" style="margin:0;">状态</label>
+    <select id="status" name="status" style="width:auto;">
+      {% for s in editable %}
+        <option value="{{ s }}" {% if project.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn secondary small" type="submit">更新</button>
+  </form>
+  <h2 style="margin-top:20px;">项目描述 <a class="btn secondary small" href="{{ url_for('edit_project', project_id=project.id) }}">编辑</a></h2>
+  <p style="white-space:pre-wrap;">{{ project.description or '（没有填写描述）' }}</p>
+</div>
+
+<div class="card">
+  <h2>生成完整 Prompt</h2>
+  <p class="muted">AI 会先诊断项目是否可行、有没有冲突，再提几个关键问题，你回答后，它会整理出需求摘要和可以直接复制的 prompt。</p>
+  <form method="POST" action="{{ url_for('prompt_new', project_id=project.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">开始生成</button>
+    <span class="muted">（诊断 + 提问需要十几秒）</span>
+  </form>
+
+  {% if project.prompt_sessions %}
+    <h2 style="margin-top:24px;">历史记录</h2>
+    {% for ps in project.prompt_sessions %}
+      <div class="project-row">
+        <a class="name" href="{{ url_for('prompt_view', project_id=project.id, session_id=ps.id) }}">
+          {{ ps.created_at.strftime('%Y-%m-%d %H:%M') }}
+        </a>
+        <span class="muted">{% if ps.final_prompt %}已生成 prompt{% elif ps.summary and not ps.blocked %}等待你确认{% elif ps.blocked %}<span class="overdue">有未解决的冲突</span>{% else %}等待回答问题{% endif %}</span>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% if paper_ps or paper_hint %}
+<div class="card">
+  <h2>论文推荐</h2>
+  {% if paper_hint %}<p class="muted">{{ paper_hint }}</p>
+  {% else %}
+    <p class="muted">根据你最近一次已确认的摘要，检索真实存在的学术论文；AI 只负责挑选和说明理由。</p>
+    <a class="btn secondary" href="{{ url_for('papers', project_id=project.id) }}">打开论文推荐{% if project.paper_searches %}（已有 {{ project.paper_searches | length }} 次检索）{% endif %}</a>
+  {% endif %}
+</div>
+{% endif %}
+<p><a href="{{ url_for('dashboard') }}">← 返回 Dashboard</a></p>
+{% endblock %}

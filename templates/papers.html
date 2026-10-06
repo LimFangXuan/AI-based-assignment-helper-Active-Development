@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}论文推荐 - 作业效率助手{% endblock %}
+{% block content %}
+<h1>论文推荐</h1>
+<p class="muted">项目：{{ project.name }}</p>
+
+{% if hint %}
+  <div class="notice">{{ hint }}</div>
+{% else %}
+  <div class="card">
+    <p class="muted">流程：AI 根据你已确认的摘要生成英文检索词 → 在 OpenAlex 学术数据库检索真实论文 →
+      AI 只能从检索结果里挑选并说明理由 → 代码核对每一篇都来自检索结果，对不上的直接丢弃。</p>
+    <form method="POST" action="{{ url_for('papers_new', project_id=project.id) }}" class="inline-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label>需要几篇
+        <input type="number" name="count" min="{{ min_papers }}" max="{{ max_papers }}" value="5" required></label>
+      <label><input type="checkbox" name="oa_only" value="1" checked> 只要开放获取（可以免费读全文）</label>
+      <button class="btn" type="submit">检索推荐论文</button>
+      <span class="muted">（需要十几秒）</span>
+    </form>
+  </div>
+
+  {% for search in project.paper_searches %}
+    <div class="card">
+      <h2>{{ search.created_at.strftime('%Y-%m-%d %H:%M') }} 的检索</h2>
+      <p class="muted">检索词：{{ search.queries | join('；') }} ｜ 从 {{ search.candidate_count }} 篇候选中推荐
+        {{ search.papers | length }} 篇（要求 {{ search.requested_count }} 篇{% if search.oa_only %}，只要开放获取{% endif %}）</p>
+      {% for p in search.papers %}
+        <div class="paper-item">
+          <div class="paper-title">
+            <a href="{{ url_for('paper_detail', project_id=project.id, paper_id=p.id) }}">{{ p.title }}</a>
+          </div>
+          <div class="paper-meta">{{ p.authors or '作者未知' }}{% if p.year %} · {{ p.year }}{% endif %}{% if p.venue %} · {{ p.venue }}{% endif %}</div>
+          <div class="paper-desc">{{ (p.abstract_snippet[:180] ~ '…') if p.abstract_snippet else '（OpenAlex 没有提供摘要）' }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+{% endif %}
+<p><a href="{{ url_for('project_detail', project_id=project.id) }}">← 返回项目</a></p>
+{% endblock %}

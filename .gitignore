@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.db
 instance/
+test_gemini.py

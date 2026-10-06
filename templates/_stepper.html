@@ -1,0 +1,9 @@
+{# 流程步骤条：current 是当前步骤（1 诊断与提问，2 确认，3 完成） #}
+{% set labels = ['① 诊断与提问', '② 检查并确认', '③ 复制 Prompt'] %}
+<div class="stepper">
+  {% for label in labels %}
+    <div class="step {% if loop.index < current %}done{% elif loop.index == current %}current{% endif %}">
+      {{ '✓ ' if loop.index < current else '' }}{{ label }}
+    </div>
+  {% endfor %}
+</div>

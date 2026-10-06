@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ paper.title }} - 作业效率助手{% endblock %}
+{% block content %}
+<h1 style="font-size:1.35rem;">{{ paper.title }}</h1>
+<p class="muted">{{ paper.authors or '作者未知' }}{% if paper.year %} · {{ paper.year }}{% endif %}{% if paper.venue %} · {{ paper.venue }}{% endif %}</p>
+
+<div class="card">
+  <h2>AI 推荐理由</h2>
+  <p>{{ paper.reason }}</p>
+  {% if paper.relevance %}<p class="muted">AI 相关度：{{ paper.relevance }}/10（只供你个人筛选，不要写进作业）</p>{% endif %}
+  <p class="muted">理由只依据标题和摘要，AI 没有读过全文。论文本身来自 OpenAlex，不是 AI 生成的。</p>
+</div>
+
+<div class="card">
+  <h2>论文信息</h2>
+  <div class="diag-grid">
+    <div><strong>作者</strong></div><div>{{ paper.author_list | join(', ') if paper.author_list else '未知' }}</div>
+    <div><strong>年份</strong></div><div>{{ paper.year or '未知' }}</div>
+    <div><strong>发表于</strong></div><div>{{ paper.venue or '未知' }}{% if paper.volume %}，第 {{ paper.volume }} 卷{% endif %}{% if paper.issue %}第 {{ paper.issue }} 期{% endif %}{% if paper.pages %}，页 {{ paper.pages }}{% endif %}</div>
+    <div><strong>类型</strong></div><div>{{ paper.work_type or '未知' }}</div>
+    <div><strong>被引次数</strong></div><div>{{ paper.cited_by_count }}</div>
+    <div><strong>开放获取</strong></div><div>{% if paper.is_oa %}<span class="badge good">是</span>{% else %}<span class="badge neutral">否</span>{% endif %}</div>
+    <div><strong>DOI</strong></div><div>{% if paper.doi %}<a href="{{ paper.doi if paper.doi.startswith('http') else 'https://doi.org/' ~ paper.doi }}" target="_blank" rel="noopener noreferrer">{{ paper.doi }}</a>{% else %}无{% endif %}</div>
+    <div><strong>链接</strong></div><div>
+      {% if paper.url %}<a href="{{ paper.url }}" target="_blank" rel="noopener noreferrer">论文页面</a>{% endif %}
+      {% if paper.oa_url %} · <a href="{{ paper.oa_url }}" target="_blank" rel="noopener noreferrer">免费全文</a>{% endif %}
+      {% if not paper.url and not paper.oa_url %}无{% endif %}</div>
+    <div><strong>OpenAlex ID</strong></div><div>{{ paper.openalex_id }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>摘要</h2>
+  <p style="white-space:pre-wrap;">{{ paper.abstract_snippet or '（OpenAlex 没有提供摘要）' }}{% if paper.abstract_snippet|length >= 600 %}…{% endif %}</p>
+</div>
+
+<div class="card">
+  <div class="header-row"><h2>引用格式（接近 APA）</h2><button class="btn small" type="button" id="copy-cite">复制</button></div>
+  <div class="citation" id="citation">{{ paper.citation }}</div>
+  <p class="muted">根据 OpenAlex 的元数据自动生成，不经过 AI；提交作业前请对照原文核对格式。</p>
+</div>
+
+<p class="muted">来自 {{ paper.search.created_at.strftime('%Y-%m-%d %H:%M') }} 的检索，检索词：{{ paper.search.queries | join('；') }}</p>
+<p><a href="{{ url_for('papers', project_id=project.id) }}">← 返回论文列表</a></p>
+<script>
+  document.getElementById('copy-cite').addEventListener('click', async (e) => {
+    const text = document.getElementById('citation').innerText;
+    try { await navigator.clipboard.writeText(text); } catch (err) {}
+    e.target.textContent = '已复制 ✓';
+    setTimeout(() => { e.target.textContent = '复制'; }, 2000);
+  });
+</script>
+{% endblock %}

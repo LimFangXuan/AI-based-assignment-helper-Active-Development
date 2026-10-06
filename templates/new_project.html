@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ "编辑项目" if editing else "创建项目" }} - 作业效率助手{% endblock %}
+{% block content %}
+<h1>{{ "编辑项目" if editing else "创建项目" }}</h1>
+<div class="card">
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label for="name">项目名称</label>
+    <input type="text" id="name" name="name" maxlength="120" value="{{ name or '' }}" required>
+    <label for="deadline">截止日期和时间</label>
+    <input type="datetime-local" id="deadline" name="deadline" value="{{ deadline or '' }}" required>
+    <label for="description">项目描述</label>
+    <p class="muted" style="margin:0 0 6px;">把老师的 guideline、评分标准、你的想法都写在这里，越具体，AI 问的问题越准。</p>
+    <p class="muted" style="margin:0 0 6px;">🔒 电话和邮箱会在发给 AI 之前自动隐藏；地址、证件号等请不要填写。</p>
+    <textarea id="description" name="description" rows="10" maxlength="5000">{{ description or '' }}</textarea>
+    <p><button class="btn" type="submit">{{ "保存" if editing else "创建" }}</button>
+       <a class="btn secondary" href="{{ url_for('project_detail', project_id=editing.id) if editing else url_for('dashboard') }}">取消</a></p>
+  </form>
+</div>
+{% endblock %}

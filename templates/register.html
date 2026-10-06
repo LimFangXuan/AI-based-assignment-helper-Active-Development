@@ -1,20 +1,17 @@
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="UTF-8">
-    <title>注册 - 作业效率助手</title>
-</head>
-<body>
-    <h1>注册</h1>
-
-    {% if error %}
-        <p style="color: red;">{{ error }}</p>
-    {% endif %}
-
-    <form method="POST">
-        <p>用户名：<input type="text" name="username" required></p>
-        <p>密码：<input type="password" name="password" required></p>
-        <button type="submit">注册</button>
-    </form>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}注册 - 作业效率助手{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px;margin:40px auto;">
+  <h1>注册</h1>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label for="username">用户名（3-80 个字符）</label>
+    <input type="text" id="username" name="username" value="{{ username or '' }}" required>
+    <label for="password">密码（至少 6 个字符）</label>
+    <input type="password" id="password" name="password" required>
+    <p><button class="btn" type="submit">注册</button></p>
+  </form>
+  <p class="muted">已有账号？<a href="{{ url_for('login') }}">去登录</a></p>
+</div>
+{% endblock %}

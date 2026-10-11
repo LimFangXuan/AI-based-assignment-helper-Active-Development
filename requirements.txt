@@ -3,3 +3,5 @@ Flask-SQLAlchemy==3.1.1
 python-dotenv==1.2.4
 google-genai==2.28.0
 httpx==0.28.1
+pywebpush==2.5.0
+tzdata==2026.5

@@ -13,6 +13,7 @@
 <nav class="settings-nav chips" aria-label="Settings sections">
   <a class="chip" href="#profile">Profile</a>
   <a class="chip" href="#security">Security</a>
+  <a class="chip" href="#notifications">Notifications</a>
   <a class="chip" href="#connected">Connected accounts</a>
   <a class="chip" href="#appearance">Appearance</a>
   <a class="chip" href="#privacy">Privacy &amp; data</a>
@@ -36,12 +37,27 @@
           <input type="text" id="email" name="email" value="{{ g.user.email or '' }}" maxlength="254" autocomplete="email" inputmode="email">
         </div>
       </div>
-      <p class="field-hint" style="margin-top:8px;">Your email is only kept so you can tell which Google account belongs here. It is never shown to anyone, and the app sends no emails.</p>
+      <p class="field-hint" style="margin-top:8px;">Your email is never shown to anyone. Once confirmed it is used to reset your password and, if you choose, to send reminders. Changing it means confirming the new address again.</p>
       <div class="btn-row" style="margin-top:14px;">
         <button class="btn" type="submit"><i class="ph ph-check"></i>Save profile</button>
         {% if g.user.created_at %}<span class="muted small">Member since {{ g.user.created_at.strftime('%d %b %Y') }}</span>{% endif %}
       </div>
     </form>
+    {% if g.user.email %}
+      <div class="setting-row" style="margin-top:16px;">
+        <span class="provider-logo"><i class="ph ph-envelope-simple"></i></span>
+        <div class="setting-main">
+          <strong>{{ g.user.email }}</strong>
+          <div class="small">{% if g.user.email_verified %}<span class="tag ok"><i class="ph ph-check"></i>Confirmed</span>{% else %}<span class="tag soon">Not confirmed yet</span> <span class="muted">Open the link we emailed you.</span>{% endif %}</div>
+        </div>
+        {% if not g.user.email_verified %}
+          <form method="POST" action="{{ url_for('settings.resend_verification') }}" style="margin:0;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn outline small" type="submit">Resend link</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endif %}
   </section>
 
   <section class="card" id="security" aria-labelledby="security-h">
@@ -68,9 +84,89 @@
             <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button></div>
         </div>
       </div>
-      <p class="field-hint" style="margin-top:8px;">Resetting a forgotten password by email isn't available yet, so keep this one somewhere safe.</p>
+      <p class="field-hint" style="margin-top:8px;">Forgot it later? On the log-in page, &ldquo;Forgot password?&rdquo; emails you a reset link, as long as your email address is confirmed.</p>
       <div class="btn-row" style="margin-top:14px;"><button class="btn" type="submit"><i class="ph ph-lock-key"></i>{{ 'Update password' if g.user.has_password else 'Set password' }}</button></div>
     </form>
+  </section>
+
+  <section class="card" id="notifications" aria-labelledby="notifications-h">
+    <h2 id="notifications-h">Notifications</h2>
+    <p class="muted" style="margin:6px 0 0;">Get a daily summary of what is due, and a reminder before each deadline, by email, as a push notification, or both. Everything is off until you turn it on.</p>
+    {% if not mail_enabled %}
+      <div class="notice" style="margin:12px 0 0;"><i class="ph ph-info"></i><span>Email is turned off on this server.</span></div>
+    {% elif not mail_real %}
+      <div class="notice" style="margin:12px 0 0;"><i class="ph ph-info"></i><span>Development mode: no email service is configured, so emails are printed in the server log instead of being sent.</span></div>
+    {% endif %}
+    {% if not email_ready and mail_enabled %}
+      <div class="notice" style="margin:12px 0 0;"><i class="ph ph-envelope-simple"></i><span>{{ 'Confirm your email address (see Profile) to get emails.' if g.user.email else 'Add and confirm an email address (see Profile) to get emails.' }}</span></div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('settings.notifications') }}" class="notify-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="notify-table" role="group" aria-label="Which notifications to send">
+        <div class="notify-head"><span></span><span>Email</span><span>Push</span></div>
+        <div class="notify-row">
+          <div><strong>Daily summary</strong><div class="muted small">Tasks due today, overdue tasks and deadlines today.</div></div>
+          <label class="switch"><input type="checkbox" name="notify_email_digest" value="1" {% if g.user.notify_email_digest and email_ready %}checked{% endif %} {% if not email_ready %}disabled{% endif %}><span class="sr-only">Daily summary by email</span></label>
+          <label class="switch"><input type="checkbox" name="notify_push_digest" value="1" {% if g.user.notify_push_digest and devices %}checked{% endif %} {% if not devices %}disabled{% endif %}><span class="sr-only">Daily summary by push</span></label>
+        </div>
+        <div class="notify-row">
+          <div><strong>Deadline reminders</strong><div class="muted small">3 days and 1 day before a project is due.</div></div>
+          <label class="switch"><input type="checkbox" name="notify_email_deadlines" value="1" {% if g.user.notify_email_deadlines and email_ready %}checked{% endif %} {% if not email_ready %}disabled{% endif %}><span class="sr-only">Deadline reminders by email</span></label>
+          <label class="switch"><input type="checkbox" name="notify_push_deadlines" value="1" {% if g.user.notify_push_deadlines and devices %}checked{% endif %} {% if not devices %}disabled{% endif %}><span class="sr-only">Deadline reminders by push</span></label>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-top:6px;">
+        <div>
+          <label for="timezone">Your time zone</label>
+          <select id="timezone" name="timezone" data-timezone data-default="{{ g.user.timezone }}">
+            {% for z in timezones %}<option value="{{ z }}" {% if z == g.user.timezone %}selected{% endif %}>{{ z }}</option>{% endfor %}
+          </select>
+          <p class="field-hint" style="margin-top:6px;" data-tz-hint hidden></p>
+        </div>
+        <div>
+          <label for="digest_hour">Send the daily summary at</label>
+          <select id="digest_hour" name="digest_hour">
+            {% for h in range(0, digest_last_hour) %}<option value="{{ h }}" {% if h == g.user.digest_hour %}selected{% endif %}>{{ '%02d:00' % h }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="btn-row" style="margin-top:14px;"><button class="btn" type="submit"><i class="ph ph-check"></i>Save notification settings</button></div>
+    </form>
+
+    <hr class="soft">
+    <div data-push data-vapid-key="{{ vapid_key }}" data-subscribe-url="{{ url_for('settings.push_subscribe') }}" data-unsubscribe-url="{{ url_for('settings.push_unsubscribe') }}">
+      <div class="setting-row">
+        <span class="provider-logo"><i class="ph ph-bell-ringing"></i></span>
+        <div class="setting-main">
+          <strong>Push notifications on this device</strong>
+          <div class="muted small" data-push-status>Checking this browser...</div>
+        </div>
+        <button class="btn outline small" type="button" data-push-enable hidden>Enable</button>
+        <button class="btn outline small" type="button" data-push-disable hidden>Turn off</button>
+      </div>
+      {% if devices %}
+      <ul class="device-list">
+        {% for d in devices %}
+          <li><i class="ph ph-device-mobile"></i><span class="muted small">{{ (d.user_agent or 'Unknown browser')[:70] }} &middot; added {{ d.created_at.strftime('%d %b %Y') }}</span>
+            <form method="POST" action="{{ url_for('settings.push_remove', device_id=d.id) }}" style="margin:0 0 0 auto;">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button class="icon-btn danger" type="submit" aria-label="Remove this device" title="Remove this device"><i class="ph ph-trash"></i></button>
+            </form></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    <div class="btn-row" style="margin-top:14px;">
+      <form method="POST" action="{{ url_for('settings.notifications_test') }}" style="margin:0;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="channel" value="email">
+        <button class="btn outline small" type="submit" {% if not email_ready %}disabled title="Confirm your email first"{% endif %}><i class="ph ph-envelope-simple"></i>Send a test email</button>
+      </form>
+      <form method="POST" action="{{ url_for('settings.notifications_test') }}" style="margin:0;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="channel" value="push">
+        <button class="btn outline small" type="submit" {% if not devices %}disabled title="Enable push on a device first"{% endif %}><i class="ph ph-bell"></i>Send a test push</button>
+      </form>
+    </div>
   </section>
 
   <section class="card" id="connected" aria-labelledby="connected-h">
@@ -118,6 +214,8 @@
           but other personal details are not, so don't enter addresses or ID numbers. Depending on Google's terms for the plan in use, inputs may be used to improve its models.</p></div>
       <div><strong>What is sent to the paper database</strong>
         <p class="muted">Only short English search terms go to OpenAlex, never your description or guideline.</p></div>
+      <div><strong>Email and push</strong>
+        <p class="muted">Emails contain only project names and task titles, never your description or guideline. Push messages go through your browser's push service (Google, Mozilla or Apple) and carry the same short text. You can turn both off above at any time.</p></div>
       <div><strong>Cookies and local storage</strong>
         <p class="muted">One session cookie keeps you logged in. Your theme and sidebar choices are saved in this browser. There is no tracking or advertising.</p></div>
     </div>

@@ -26,6 +26,13 @@ COLUMNS = [
     ("user", "email", "VARCHAR(254)"),
     ("user", "google_sub", "VARCHAR(64)"),
     ("user", "created_at", "DATETIME"),
+    ("user", "email_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("user", "timezone", "VARCHAR(64) NOT NULL DEFAULT 'UTC'"),
+    ("user", "digest_hour", "INTEGER NOT NULL DEFAULT 8"),
+    ("user", "notify_email_digest", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("user", "notify_email_deadlines", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("user", "notify_push_digest", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("user", "notify_push_deadlines", "BOOLEAN NOT NULL DEFAULT 0"),
 ]
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_project_user_deadline ON project (user_id, deadline)",

@@ -24,9 +24,23 @@ class User(db.Model):
     has_password = db.Column(db.Boolean, nullable=False, default=True)
     email = db.Column(db.String(254))
     google_sub = db.Column(db.String(64))  # Google 账号的固定 ID（不会随邮箱改变）
+    email_verified = db.Column(db.Boolean, nullable=False, default=False)  # 只有验证过的邮箱才用于找回密码和通知
     created_at = db.Column(db.DateTime, default=datetime.now)
+    # 通知偏好（默认全部关闭，用户自己打开）
+    timezone = db.Column(db.String(64), nullable=False, default="UTC")
+    digest_hour = db.Column(db.Integer, nullable=False, default=8)
+    notify_email_digest = db.Column(db.Boolean, nullable=False, default=False)
+    notify_email_deadlines = db.Column(db.Boolean, nullable=False, default=False)
+    notify_push_digest = db.Column(db.Boolean, nullable=False, default=False)
+    notify_push_deadlines = db.Column(db.Boolean, nullable=False, default=False)
 
     projects = db.relationship("Project", backref="owner", cascade="all, delete-orphan")
+    push_subscriptions = db.relationship("PushSubscription", backref="user", cascade="all, delete-orphan")
+    notification_logs = db.relationship("NotificationLog", backref="user", cascade="all, delete-orphan")
+
+    @property
+    def wants_notifications(self):
+        return any((self.notify_email_digest, self.notify_email_deadlines, self.notify_push_digest, self.notify_push_deadlines))
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

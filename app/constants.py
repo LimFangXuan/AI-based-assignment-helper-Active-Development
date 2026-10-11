@@ -59,6 +59,17 @@ EMAIL_MAX_CHARS = 254
 LOGIN_MAX_FAILURES = 5        # 同一个用户名 + 地址，10 分钟内最多失败几次
 LOGIN_WINDOW_SECONDS = 600
 
+# ---------- 邮件与通知 ----------
+VERIFY_EMAIL_MAX_AGE = 3 * 24 * 3600   # 验证邮箱的链接 3 天内有效
+RESET_PASSWORD_MAX_AGE = 3600          # 重置密码的链接 1 小时内有效，并且只能用一次
+EMAIL_REQUEST_LIMIT = 5                # 同一个地址 / 邮箱，10 分钟内最多请求几封验证 / 重置邮件
+DEFAULT_TIMEZONE = "UTC"
+DEFAULT_DIGEST_HOUR = 8                # 每日摘要：用户本地时间几点之后发送
+DIGEST_LAST_HOUR = 22                  # 本地时间超过这个钟点就不再补发当天的摘要
+DEADLINE_REMINDER_HOURS = ((72, "deadline-3d"), (24, "deadline-1d"))  # 截止前多少小时提醒（每个项目每档只提醒一次）
+DIGEST_MAX_TASKS = 10
+MAX_PUSH_DEVICES = 10                  # 每个账号最多登记几台设备
+
 # ---------- 长度限制 ----------
 NAME_MAX_CHARS = 120
 # 暂定值：Gemini 免费额度的单次请求上限远大于这个数，但正式确定前还要实测（见 spec §4.2）

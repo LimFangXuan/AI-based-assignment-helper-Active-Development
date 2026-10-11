@@ -26,11 +26,14 @@ def _recent(key, now):
     return kept
 
 
+_limits = {}  # 个别 key 用自己的上限（例如“忘记密码”按发信频率限制）
+
+
 def seconds_blocked(key):
     """还要等几秒才能再试；没被限制返回 0。"""
     now = time.time()
     recent = _recent(key, now)
-    if len(recent) < LOGIN_MAX_FAILURES:
+    if len(recent) < _limits.get(key, LOGIN_MAX_FAILURES):
         return 0
     return int(recent[0] + LOGIN_WINDOW_SECONDS - now) + 1
 
@@ -43,8 +46,10 @@ def blocked_message(key):
     return f"Too many failed attempts. Try again in {minutes} minute{'s' if minutes != 1 else ''}."
 
 
-def record_failure(key):
+def record_failure(key, limit=None):
     _failures.setdefault(key, []).append(time.time())
+    if limit:
+        _limits[key] = limit
 
 
 def reset(key):
@@ -53,3 +58,4 @@ def reset(key):
 
 def reset_all():
     _failures.clear()
+    _limits.clear()

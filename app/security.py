@@ -50,7 +50,7 @@ def get_csrf_token():
 
 def check_csrf():
     """注册为 before_request：任何 POST 都必须带正确的令牌。"""
-    if request.method == "POST":
+    if request.method == "POST" and request.endpoint != "cron.reminders":  # cron 入口用自己的令牌，不是浏览器表单
         sent = request.form.get("_csrf_token", "").encode()
         expected = session.get("_csrf_token", "").encode()
         if not expected or not hmac.compare_digest(sent, expected):

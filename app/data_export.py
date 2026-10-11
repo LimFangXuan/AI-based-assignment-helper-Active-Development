@@ -46,8 +46,15 @@ def build_export(user: User):
         })
     return {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
-        "account": {"username": user.username, "email": user.email, "created_at": _iso(user.created_at),
-                    "google_connected": bool(user.google_sub), "has_password": bool(user.has_password)},
+        "account": {"username": user.username, "email": user.email, "email_verified": bool(user.email_verified),
+                    "created_at": _iso(user.created_at), "google_connected": bool(user.google_sub),
+                    "has_password": bool(user.has_password),
+                    "notifications": {"timezone": user.timezone, "daily_summary_hour": user.digest_hour,
+                                      "email_daily_summary": bool(user.notify_email_digest),
+                                      "email_deadline_reminders": bool(user.notify_email_deadlines),
+                                      "push_daily_summary": bool(user.notify_push_digest),
+                                      "push_deadline_reminders": bool(user.notify_push_deadlines),
+                                      "push_devices": len(user.push_subscriptions)}},
         "projects": projects,
     }
 

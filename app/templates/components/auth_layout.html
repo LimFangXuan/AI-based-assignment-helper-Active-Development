@@ -36,6 +36,7 @@
                  autocomplete="{{ 'current-password' if mode == 'login' else 'new-password' }}" {% if mode == 'register' %}minlength="8"{% endif %}>
           <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button>
         </div>
+        {% if mode == 'login' %}<p style="margin:8px 0 0;text-align:right;"><a class="link small" href="{{ url_for('auth.forgot_password') }}">Forgot password?</a></p>{% endif %}
         <p style="margin-top:22px;"><button class="btn block" type="submit">{{ 'Log in' if mode == 'login' else 'Create account' }}<i class="ph ph-arrow-right"></i></button></p>
       </form>
       {% if mode == 'login' %}

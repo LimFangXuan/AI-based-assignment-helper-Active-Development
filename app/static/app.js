@@ -458,4 +458,88 @@
       $("input", row).focus();
     }));
   });
+  // ---------- 推送通知：在这台设备上开启 / 关闭（需要 https 或 localhost） ----------
+  const pushBox = $("[data-push]");
+  if (pushBox) {
+    const status = $("[data-push-status]", pushBox);
+    const enableBtn = $("[data-push-enable]", pushBox);
+    const disableBtn = $("[data-push-disable]", pushBox);
+    const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+    const b64ToBytes = (text) => {
+      const raw = atob((text + "=".repeat((4 - (text.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+      return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+    };
+    const currentSub = async () => {
+      const reg = await navigator.serviceWorker.getRegistration("/");
+      return reg ? reg.pushManager.getSubscription() : null;
+    };
+    const show = (text, mode) => {
+      status.textContent = text;
+      enableBtn.hidden = mode !== "off";
+      disableBtn.hidden = mode !== "on";
+    };
+    async function render() {
+      if (!window.isSecureContext) return show("Push notifications need a secure (https) connection.", "none");
+      if (!supported) return show("This browser doesn't support push notifications. On an iPhone, add this site to your Home Screen first.", "none");
+      if (Notification.permission === "denied") return show("Notifications are blocked for this site. Allow them in your browser's site settings, then reload.", "none");
+      try {
+        const sub = await currentSub();
+        show(sub ? "Enabled on this device." : "Not enabled on this device.", sub ? "on" : "off");
+      } catch (e) { show("Could not check this browser.", "none"); }
+    }
+    enableBtn.addEventListener("click", async () => {
+      enableBtn.classList.add("is-loading");
+      try {
+        if ((await Notification.requestPermission()) !== "granted") { await render(); return; }
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await navigator.serviceWorker.ready;
+        const old = await reg.pushManager.getSubscription();
+        if (old) await old.unsubscribe();  // 服务器的密钥换过时，旧订阅不能复用
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(pushBox.dataset.vapidKey) });
+        const json = sub.toJSON();
+        try {
+          await send(pushBox.dataset.subscribeUrl, formData({ endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth }));
+        } catch (err) { await sub.unsubscribe(); throw err; }
+        toast("Push notifications enabled on this device.");
+        setTimeout(() => location.reload(), 600);  // 刷新后设备列表和开关才会更新
+      } catch (err) {
+        toast("Could not enable push: " + (err.message || err), "error");
+        await render();
+      } finally { enableBtn.classList.remove("is-loading"); }
+    });
+    disableBtn.addEventListener("click", async () => {
+      disableBtn.classList.add("is-loading");
+      try {
+        const sub = await currentSub();
+        if (sub) {
+          const endpoint = sub.endpoint;
+          await sub.unsubscribe();
+          await send(pushBox.dataset.unsubscribeUrl, formData({ endpoint }));
+        }
+        toast("Push notifications turned off on this device.");
+        setTimeout(() => location.reload(), 600);
+      } catch (err) { toast(err.message || "Could not turn off push.", "error"); } finally { disableBtn.classList.remove("is-loading"); }
+    });
+    render();
+  }
+
+  // ---------- 时区：默认值还是 UTC 时自动选这台设备的时区，否则只给个建议 ----------
+  const tzSelect = $("[data-timezone]");
+  if (tzSelect) {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const hint = $("[data-tz-hint]");
+      const known = [...tzSelect.options].some((o) => o.value === detected);
+      if (detected && known && detected !== tzSelect.value) {
+        if (tzSelect.dataset.default === "UTC") {
+          tzSelect.value = detected;
+          hint.textContent = `Detected from this device: ${detected}. Save to keep it.`;
+        } else {
+          hint.innerHTML = `This device is in ${detected}. <button class="link" type="button" style="background:none;border:0;padding:0;cursor:pointer;font:inherit;">Use it</button>`;
+          $("button", hint).addEventListener("click", () => { tzSelect.value = detected; hint.textContent = "Save to keep it."; });
+        }
+        hint.hidden = false;
+      }
+    } catch (e) { /* 浏览器不支持就保持原样 */ }
+  }
 })();

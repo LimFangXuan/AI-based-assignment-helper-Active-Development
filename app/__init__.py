@@ -20,13 +20,23 @@ def create_app():
     db.init_app(app)
 
     from . import security, template_helpers
-    from .blueprints import auth, calendar, overview, projects, settings
+    from .blueprints import auth, calendar, cron, overview, projects, settings
     from .blueprints.tools import papers, planner, prompt, report, requirements
 
     app.before_request(security.check_csrf)
     template_helpers.register(app)
-    for module in (auth, overview, calendar, projects, settings, requirements, prompt, planner, papers, report):
+    for module in (auth, overview, calendar, projects, settings, cron, requirements, prompt, planner, papers, report):
         app.register_blueprint(module.bp)
+
+    @app.route("/sw.js")
+    def service_worker():
+        """Service worker 必须从网站根目录提供，作用范围才是整个网站。每次都重新检查，更新才能及时生效。"""
+        from flask import send_from_directory
+
+        response = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+        response.headers["Service-Worker-Allowed"] = "/"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     # 创建应用时就建表 / 升级：无论用 python run.py、flask run 还是 WSGI 服务器启动，数据库都已经准备好
     from .schema import ensure_schema

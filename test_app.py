@@ -1195,13 +1195,15 @@ with app.app_context():
     db.session.query(User).filter_by(username="kate").update({"email": "kate@example.com"})
     db.session.commit()
 n = user_count()
-q, r = google_flow(cg, gp("g-222", "Kate@Example.com"))
-check("邮箱和已有的密码账号相同：不自动合并，提示先登录再到 Settings 连接",
-      "Log in with your password, then connect Google" in cg.get(r.location).get_data(as_text=True)
-      and user_count() == n and user_row("kate").google_sub is None)
+q, r = google_flow(app.test_client(), gp("g-222", "Kate@Example.com"))
+check("本站邮箱只是自己填的、没验证过：不能凭它抢走账号。Google 验证过的邮箱优先，对方的占用被清掉，新建账号",
+      user_count() == n + 1 and user_row("kate").google_sub is None and user_row("kate").email is None)
+with app.app_context():
+    kate_google = User.query.filter_by(google_sub="g-222").first()
+check("新建的 Google 账号邮箱是已验证的", kate_google.email == "kate@example.com" and kate_google.email_verified is True)
 register(app.test_client(), "alice2")
 q, r = google_flow(cg, gp("g-333", "alice2@gmail.com"))
-check("用户名被占用：自动换一个不重复的新账号，原来的账号不受影响", user_count() == n + 2 and user_row("alice2").google_sub is None)
+check("用户名被占用：自动换一个不重复的新账号，原来的账号不受影响", user_count() == n + 3 and user_row("alice2").google_sub is None)
 with app.app_context():
     new_name = User.query.filter_by(google_sub="g-333").first().username
 check("新用户名以邮箱前缀开头、不是已被占用的那个", new_name.startswith("alice2") and new_name != "alice2")
@@ -1351,6 +1353,739 @@ for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"):
     os.environ.pop(k, None)
 login_throttle.reset_all()
 
+# ================= 9e. 邮件、验证邮箱、忘记密码 =================
+import smtplib  # noqa: E402
+from datetime import timezone as dt_timezone  # noqa: E402
+
+from pywebpush import WebPushException  # noqa: E402
+
+from app import reminders, tokens  # noqa: E402
+from app.models import NotificationLog, PushSubscription  # noqa: E402
+from app.services import mailer, push  # noqa: E402
+
+login_throttle.reset_all()
+for k in ("MAIL_BACKEND", "SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_SECURITY", "MAIL_FROM", "APP_BASE_URL",
+          "REMINDER_TOKEN", "VAPID_PRIVATE_KEY", "VAPID_PUBLIC_KEY", "VAPID_SUBJECT"):
+    os.environ.pop(k, None)
+os.environ["VAPID_KEY_FILE"] = Path(TMP, "vapid.json").as_posix()
+
+
+def set_user(username, **fields):
+    with app.app_context():
+        User.query.filter_by(username=username).update(fields)
+        db.session.commit()
+
+
+def user_attr(username, name):
+    with app.app_context():
+        return getattr(User.query.filter_by(username=username).first(), name)
+
+
+def mail_body(msg):
+    return msg.get_body(preferencelist=("plain",)).get_content()
+
+
+def link_path(msg, kind):
+    found = re.search(r"https?://\S+/%s/\S+" % kind, mail_body(msg))
+    return urlparse(found.group(0)).path if found else None
+
+
+# ---------- mailer 本身 ----------
+check("没配置 SMTP：默认是 console 后端，邮件不会真的发出", mailer.backend() == "console" and mailer.real() is False and mailer.enabled())
+mailer.OUTBOX.clear()
+mailer.send("a@example.com", "Hello", "plain text", "<p>html</p>")
+msg = mailer.OUTBOX[-1]
+check("console 后端：邮件只记录下来，有纯文本和 HTML 两种格式", msg["To"] == "a@example.com" and msg["Subject"] == "Hello"
+      and msg.is_multipart() and "html" in [p.get_content_subtype() for p in msg.iter_parts()])
+mailer.send("a@example.com", "Bad\r\nBcc: victim@example.com", "x")
+check("主题里的换行被去掉：不能借此塞进额外的邮件头（header injection）", "\n" not in mailer.OUTBOX[-1]["Subject"] and mailer.OUTBOX[-1]["Bcc"] is None)
+os.environ["MAIL_BACKEND"] = "off"
+try:
+    mailer.send("a@example.com", "x", "y")
+    check("关闭发信时发送应报错", False)
+except mailer.MailError as e:
+    check("MAIL_BACKEND=off：发送会抛出带用户提示的 MailError", "turned off" in e.user_message and mailer.enabled() is False)
+os.environ.pop("MAIL_BACKEND")
+
+
+class FakeSMTP:
+    instances, fail = [], None
+
+    def __init__(self, host, port, **kw):
+        self.host, self.port, self.kw, self.calls, self.sent = host, port, kw, [], None
+        FakeSMTP.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def starttls(self, context=None):
+        self.calls.append("starttls")
+
+    def login(self, user, password):
+        if FakeSMTP.fail == "auth":
+            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+        self.calls.append(("login", user, password))
+
+    def send_message(self, message):
+        if FakeSMTP.fail == "refused":
+            raise smtplib.SMTPRecipientsRefused({"x@example.com": (550, b"no such user")})
+        if FakeSMTP.fail == "down":
+            raise OSError("connection reset")
+        self.sent = message
+
+
+mailer._smtp_class = lambda: FakeSMTP
+os.environ.update(SMTP_HOST="smtp.example.com", SMTP_PORT="2525", SMTP_USERNAME="mailer-user", SMTP_PASSWORD="mailer-pass",
+                  MAIL_FROM="Assignment Helper <noreply@example.com>")
+check("设置了 SMTP_HOST：自动用 smtp 后端，邮件会真的发出", mailer.backend() == "smtp" and mailer.real())
+FakeSMTP.instances.clear()
+mailer.send("student@example.com", "Real mail", "body", "<b>body</b>")
+smtp = FakeSMTP.instances[0]
+check("smtp 后端：连接设置的主机和端口，STARTTLS 后用账号密码登录，再发送", (smtp.host, smtp.port) == ("smtp.example.com", 2525)
+      and smtp.calls == ["starttls", ("login", "mailer-user", "mailer-pass")] and smtp.kw["timeout"] == mailer.TIMEOUT_SECONDS)
+check("发件人和收件人正确", smtp.sent["From"] == "Assignment Helper <noreply@example.com>" and smtp.sent["To"] == "student@example.com")
+os.environ["SMTP_SECURITY"] = "ssl"
+mailer._smtp_class = lambda: smtplib.SMTP_SSL
+check("SMTP_SECURITY=ssl：改用 SSL 连接", mailer._smtp_class() is smtplib.SMTP_SSL)
+os.environ.pop("SMTP_SECURITY")
+mailer._smtp_class = lambda: FakeSMTP
+for mode, words in (("auth", "could not log in"), ("refused", "refused"), ("down", "could not be sent")):
+    FakeSMTP.fail = mode
+    try:
+        mailer.send("x@example.com", "s", "t")
+        check(f"SMTP {mode} 应报错", False)
+    except mailer.MailError as e:
+        check(f"SMTP {mode}：翻译成友好提示，不泄露技术细节", words in e.user_message and "535" not in e.user_message)
+FakeSMTP.fail = None
+for k in ("SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "MAIL_FROM"):
+    os.environ.pop(k, None)
+
+# ---------- 令牌 ----------
+mailer.OUTBOX.clear()
+mia = app.test_client()
+register(mia, "mia")
+post(mia, "/settings/profile", {"username": "mia", "email": "Mia@Example.com"})
+check("填邮箱后：邮箱存小写，状态是“没验证”，并发出验证邮件", user_attr("mia", "email") == "mia@example.com"
+      and user_attr("mia", "email_verified") is False and mailer.OUTBOX[-1]["To"] == "mia@example.com"
+      and "Confirm your email" in mailer.OUTBOX[-1]["Subject"])
+html = mia.get("/settings").get_data(as_text=True)
+check("Settings 显示“没验证”和重新发送按钮", "Not confirmed yet" in html and "Resend link" in html)
+verify_path = link_path(mailer.OUTBOX[-1], "verify-email")
+check("验证邮件里有完整的链接（用当前网站的地址）", verify_path and "http://localhost/verify-email/" in mail_body(mailer.OUTBOX[-1]))
+with app.app_context():
+    mia_user = User.query.filter_by(username="mia").first()
+    good_token = tokens.make_verify_token(mia_user)
+    reset_token_for_mia = None
+    check("验证令牌：能读回用户；被篡改、拿重置令牌冒充都读不出来",
+          tokens.read_verify_token(good_token).id == mia_user.id and tokens.read_verify_token(good_token[:-3] + "xyz") is None
+          and tokens.read_verify_token("garbage") is None)
+    old_age = tokens.VERIFY_EMAIL_MAX_AGE
+    tokens.VERIFY_EMAIL_MAX_AGE = -1
+    expired_ok = tokens.read_verify_token(good_token) is None
+    tokens.VERIFY_EMAIL_MAX_AGE = old_age
+    check("验证令牌过期后失效", expired_ok)
+r = anon.get(verify_path)
+check("点验证链接（不需要登录）：邮箱变成已验证", user_attr("mia", "email_verified") is True and r.status_code == 302)
+check("Settings 显示“已验证”", "Confirmed" in mia.get("/settings").get_data(as_text=True))
+check("已验证后重新发送：只提示已经验证", "already confirmed" in mia.get(post(mia, "/settings/email/resend").location).get_data(as_text=True))
+
+mailer.OUTBOX.clear()
+post(mia, "/settings/profile", {"username": "mia", "email": "mia.new@example.com"})
+to = [m["To"] for m in mailer.OUTBOX]
+check("换邮箱：新邮箱要重新验证；旧邮箱收到“邮箱被改”的安全提醒", user_attr("mia", "email_verified") is False
+      and "mia.new@example.com" in to and "mia@example.com" in to
+      and any("email on your" in m["Subject"] for m in mailer.OUTBOX if m["To"] == "mia@example.com"))
+check("换邮箱后，旧邮箱的验证链接失效", "invalid or has expired" in anon.get(verify_path, follow_redirects=True).get_data(as_text=True))
+with app.app_context():
+    stale_ok = tokens.read_verify_token(good_token) is None
+check("令牌里的邮箱和账号当前邮箱对不上就作废", stale_ok)
+login_throttle.reset_all()
+for _ in range(5):
+    post(mia, "/settings/email/resend")
+check("反复点“重新发送”：被限制，避免被用来骚扰", "Too many requests" in mia.get(post(mia, "/settings/email/resend").location).get_data(as_text=True))
+login_throttle.reset_all()
+post(mia, "/settings/email/resend")
+verify_path = link_path(mailer.OUTBOX[-1], "verify-email")
+anon.get(verify_path)
+check("重新发送的新链接可以用", user_attr("mia", "email_verified") is True)
+
+# 没验证过的邮箱不算占用
+una = app.test_client()
+register(una, "una")
+post(una, "/settings/profile", {"username": "una", "email": "shared@example.com"})
+ben = app.test_client()
+register(ben, "ben")
+post(ben, "/settings/profile", {"username": "ben", "email": "shared@example.com"})
+check("别人只是填了、没验证的邮箱：真正拥有它的人仍然可以用（对方的会被清掉）", user_attr("ben", "email") == "shared@example.com"
+      and user_attr("una", "email") is None)
+anon.get(link_path(mailer.OUTBOX[-1], "verify-email"))
+check("ben 验证之后这个邮箱就是 ben 的了", user_attr("ben", "email_verified") is True)
+check("已验证的邮箱别人不能再用", "already used" in una.get(post(una, "/settings/profile", {"username": "una", "email": "shared@example.com"}).location).get_data(as_text=True))
+
+# Google 合并规则（验证邮箱之后）
+os.environ["GOOGLE_CLIENT_ID"], os.environ["GOOGLE_CLIENT_SECRET"] = "test-client", "test-secret"
+lena = app.test_client()
+register(lena, "lena")
+set_user("lena", email="lena@example.com", email_verified=True)
+n = user_count()
+q, r = google_flow(app.test_client(), gp("g-777", "Lena@Example.com"))
+check("本站邮箱已验证 + Google 邮箱已验证：安全地连接到已有账号并登录，不新建账号", user_count() == n
+      and user_attr("lena", "google_sub") == "g-777" and r.location == "/")
+set_user("lena", google_sub="g-other")
+lena_google = app.test_client()
+q, r = google_flow(lena_google, gp("g-778", "lena@example.com"))
+check("已有账号连着另一个 Google 账号：拒绝合并", "different Google account" in lena_google.get(r.location).get_data(as_text=True)
+      and user_attr("lena", "google_sub") == "g-other")
+
+# ---------- 忘记密码 ----------
+login_throttle.reset_all()
+check("登录页有 Forgot password? 链接", "Forgot password?" in anon.get("/login").get_data(as_text=True))
+check("忘记密码页可以打开", "Send reset link" in anon.get("/forgot-password").get_data(as_text=True))
+mailer.OUTBOX.clear()
+r1 = post(anon, "/forgot-password", {"email": "nobody@example.com"})
+r2 = post(anon, "/forgot-password", {"email": "una@example.com"})  # una 的邮箱已被清掉
+set_user("una", email="unverified@example.com", email_verified=False)
+r3 = post(anon, "/forgot-password", {"email": "unverified@example.com"})
+check("邮箱不存在 / 已被清掉 / 没验证：都是同样的回复，也不会发邮件（不泄露谁注册过）",
+      all("belongs to an account with a confirmed email" in r.get_data(as_text=True) for r in (r1, r2, r3))
+      and len(mailer.OUTBOX) == 0)
+r = post(anon, "/forgot-password", {"email": "MIA.new@example.com"})
+reset_msg = mailer.OUTBOX[-1] if mailer.OUTBOX else None
+check("邮箱已验证：发出重置邮件（邮箱不分大小写）", reset_msg is not None and reset_msg["To"] == "mia.new@example.com"
+      and "Reset your" in reset_msg["Subject"])
+reset_path = link_path(reset_msg, "reset-password")
+check("重置页：显示新密码表单", "Choose a new password" in anon.get(reset_path).get_data(as_text=True))
+check("新密码太短被拒绝", "at least 8" in post(anon, reset_path, {"new_password": "short", "confirm_password": "short"}).get_data(as_text=True))
+check("两次不一致被拒绝", "don&#39;t match" in post(anon, reset_path, {"new_password": "newpass-1", "confirm_password": "newpass-2"}).get_data(as_text=True))
+check("重置 POST 需要 CSRF", anon.post(reset_path, data={"new_password": "newpass-1", "confirm_password": "newpass-1"}).status_code == 400)
+mailer.OUTBOX.clear()
+r = post(anon, reset_path, {"new_password": "newpass-1", "confirm_password": "newpass-1"})
+check("重置成功：跳到登录页并提示", r.status_code == 302 and "/login" in r.location
+      and "password was reset" in anon.get(r.location).get_data(as_text=True))
+check("新密码可以登录，旧密码不行", post(app.test_client(), "/login", {"username": "mia", "password": "newpass-1"}).status_code == 302
+      and "Incorrect" in post(app.test_client(), "/login", {"username": "mia", "password": "secret12"}).get_data(as_text=True))
+check("重置后发安全提醒邮件", any("password was reset" in m["Subject"] for m in mailer.OUTBOX))
+r = anon.get(reset_path)
+check("同一个重置链接只能用一次", r.status_code == 400 and "doesn't work" in r.get_data(as_text=True))
+check("被篡改的重置链接无效", anon.get(reset_path[:-4] + "abcd").status_code == 400)
+with app.app_context():
+    mia_user = User.query.filter_by(username="mia").first()
+    tok = tokens.make_reset_token(mia_user)
+    old_age = tokens.RESET_PASSWORD_MAX_AGE
+    tokens.RESET_PASSWORD_MAX_AGE = -1
+    expired = tokens.read_reset_token(tok) is None
+    tokens.RESET_PASSWORD_MAX_AGE = old_age
+    check("重置令牌 1 小时后过期", expired and tokens.read_reset_token(tok) is not None)
+    check("验证邮箱令牌不能拿来重置密码", tokens.read_reset_token(tokens.make_verify_token(mia_user)) is None)
+set_user("mia", email_verified=False)
+with app.app_context():
+    check("邮箱不再是已验证时，旧的重置链接也失效", tokens.read_reset_token(tok) is None)
+set_user("mia", email_verified=True)
+post(mia, "/settings/password", {"current_password": "newpass-1", "new_password": "another-pass-1", "confirm_password": "another-pass-1"})
+with app.app_context():
+    check("发出链接之后改过密码：旧链接作废", tokens.read_reset_token(tok) is None)
+check("改密码也会给验证过的邮箱发安全提醒", any("password was changed" in m["Subject"] for m in mailer.OUTBOX))
+
+# 只用 Google 的账号，邮箱是 Google 验证过的：可以通过重置设置一个密码
+login_throttle.reset_all()
+mailer.OUTBOX.clear()
+gonly = app.test_client()
+q, r = google_flow(gonly, gp("g-880", "gonly@example.com"))
+post(app.test_client(), "/forgot-password", {"email": "gonly@example.com"})
+path = link_path(mailer.OUTBOX[-1], "reset-password")
+post(app.test_client(), path, {"new_password": "gonly-pass-1", "confirm_password": "gonly-pass-1"})
+for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+    os.environ.pop(k, None)
+check("Google 注册的账号邮箱默认已验证；用重置链接可以给它设置密码", user_attr("gonly", "email_verified") is True
+      and user_attr("gonly", "has_password") is True
+      and post(app.test_client(), "/login", {"username": "gonly", "password": "gonly-pass-1"}).status_code == 302)
+
+# 限制发信频率
+login_throttle.reset_all()
+mailer.OUTBOX.clear()
+spam = app.test_client()
+for _ in range(5):
+    post(spam, "/forgot-password", {"email": "mia.new@example.com"})
+n_sent = len(mailer.OUTBOX)
+html = post(spam, "/forgot-password", {"email": "mia.new@example.com"}).get_data(as_text=True)
+check("请求太频繁：第 6 次被拒绝，不再发邮件", "Too many requests" in html and len(mailer.OUTBOX) == n_sent == 5)
+login_throttle.reset_all()
+os.environ["MAIL_BACKEND"] = "off"
+mailer.OUTBOX.clear()
+html = anon.get("/forgot-password").get_data(as_text=True)
+check("服务器关闭了邮件：忘记密码页如实说明", "Email is turned off" in html)
+post(anon, "/forgot-password", {"email": "mia.new@example.com"})
+check("关闭邮件时不发任何邮件", len(mailer.OUTBOX) == 0)
+os.environ.pop("MAIL_BACKEND")
+login_throttle.reset_all()
+
+# ================= 9f. Web Push 服务与订阅 =================
+PUSHES, PUSH_FAIL = [], {}
+
+
+def fake_webpush(**kw):
+    PUSHES.append(kw)
+    failure = PUSH_FAIL.get(kw["subscription_info"]["endpoint"])
+    if failure:
+        raise failure
+
+
+push._webpush = fake_webpush
+private_key, public_key_value = push.keys()
+check("第一次使用：自动生成 VAPID 密钥并保存到文件，以后读同一份", len(public_key_value) == 87 and len(private_key) == 43
+      and Path(os.environ["VAPID_KEY_FILE"]).exists() and push.keys() == (private_key, public_key_value))
+os.environ.update(VAPID_PRIVATE_KEY="env-private", VAPID_PUBLIC_KEY="env-public")
+check("环境变量里的密钥优先（部署时用它固定下来）", push.keys() == ("env-private", "env-public"))
+os.environ.pop("VAPID_PRIVATE_KEY")
+os.environ.pop("VAPID_PUBLIC_KEY")
+check("VAPID 联系方式：默认值 / 取自 MAIL_FROM / 显式设置", push.subject() == "mailto:admin@example.com"
+      and (os.environ.update(MAIL_FROM="Helper <hello@school.edu>") or push.subject()) == "mailto:hello@school.edu"
+      and (os.environ.update(VAPID_SUBJECT="https://school.edu") or push.subject()) == "https://school.edu")
+os.environ.pop("MAIL_FROM")
+os.environ.pop("VAPID_SUBJECT")
+PUSHES.clear()
+SUB = {"endpoint": "https://push.example/abc", "keys": {"p256dh": "k" * 87, "auth": "a" * 22}}
+push.send(SUB, "Title", "Body", "/today", "digest")
+sent = PUSHES[0]
+payload = json.loads(sent["data"])
+check("push.send：加密发送，带 VAPID 私钥和联系方式，内容是 JSON", sent["subscription_info"] == SUB and sent["vapid_private_key"] == private_key
+      and sent["vapid_claims"] == {"sub": "mailto:admin@example.com"} and payload == {"title": "Title", "body": "Body", "url": "/today", "tag": "digest"}
+      and sent["ttl"] == push.TTL_SECONDS)
+PUSH_FAIL[SUB["endpoint"]] = WebPushException("gone", response=SimpleNamespace(status_code=410))
+try:
+    push.send(SUB, "t", "b")
+    check("410 应抛出 PushGone", False)
+except push.PushGone:
+    check("推送服务回 410：抛出 PushGone（订阅已失效）", True)
+PUSH_FAIL[SUB["endpoint"]] = WebPushException("server error", response=SimpleNamespace(status_code=500))
+try:
+    push.send(SUB, "t", "b")
+    check("500 应抛出 PushError", False)
+except push.PushError:
+    check("推送服务回 500：抛出 PushError（临时性错误，不删订阅）", True)
+PUSH_FAIL[SUB["endpoint"]] = RuntimeError("network down")
+try:
+    push.send(SUB, "t", "b")
+    check("网络错误应抛出 PushError", False)
+except push.PushError as e:
+    check("网络错误：PushError，不泄露技术细节", "network" not in str(e))
+PUSH_FAIL.clear()
+
+# 真实的加密和签名（用真的 pywebpush，只是不联网）：模拟一台浏览器，用它自己的私钥把内容解出来
+import http_ece  # noqa: E402
+from cryptography.hazmat.primitives import hashes, serialization  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature  # noqa: E402
+from pywebpush import webpush as real_webpush  # noqa: E402
+
+
+def _b64(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _unb64(text):
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+browser_key = ec.generate_private_key(ec.SECP256R1())
+browser_auth = os.urandom(16)
+real_sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/test-endpoint", "keys": {
+    "p256dh": _b64(browser_key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)),
+    "auth": _b64(browser_auth)}}
+captured = {}
+
+
+class CapturingSession:
+    def post(self, url, data=None, headers=None, timeout=None):
+        captured.update(url=url, data=data, headers={k.lower(): v for k, v in headers.items()})
+        return SimpleNamespace(status_code=201, text="", headers={}, content=b"")
+
+
+push._webpush = lambda **kw: real_webpush(requests_session=CapturingSession(), **kw)
+push.send(real_sub, "3 tasks for today", "Read the brief", "/today", "digest")
+decrypted = json.loads(http_ece.decrypt(captured["data"], private_key=browser_key, auth_secret=browser_auth, version="aes128gcm"))
+check("真实加密：模拟的浏览器用自己的私钥能解出原文", decrypted == {"title": "3 tasks for today", "body": "Read the brief", "url": "/today", "tag": "digest"}
+      and captured["headers"]["content-encoding"] == "aes128gcm" and captured["headers"]["ttl"] == str(push.TTL_SECONDS))
+scheme, rest = captured["headers"]["authorization"].split(" ", 1)
+vapid_parts = dict(part.split("=", 1) for part in rest.split(","))
+head_b64, claims_b64, sig_b64 = vapid_parts["t"].split(".")
+claims = json.loads(_unb64(claims_b64))
+sig = _unb64(sig_b64)
+ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), _unb64(push.public_key())).verify(
+    encode_dss_signature(int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")),
+    f"{head_b64}.{claims_b64}".encode(), ec.ECDSA(hashes.SHA256()))  # 签名不对会抛异常
+check("真实签名：VAPID 头里的公钥是我们的，JWT 签名用这个公钥验证通过，面向推送服务的来源，带联系方式",
+      scheme == "vapid" and vapid_parts["k"] == push.public_key() and claims["aud"] == "https://fcm.googleapis.com"
+      and claims["sub"].startswith("mailto:") and claims["exp"] > time.time())
+push._webpush = fake_webpush
+
+check("/sw.js：从根目录提供，作用范围是整站，不缓存", (lambda r: r.status_code == 200 and "javascript" in r.content_type
+      and r.headers["Service-Worker-Allowed"] == "/" and r.headers["Cache-Control"] == "no-cache"
+      and b"showNotification" in r.data and b"notificationclick" in r.data and b"origin" in r.data)(anon.get("/sw.js")))
+
+# 订阅接口
+pu = app.test_client()
+register(pu, "pam")
+KEYS = {"p256dh": "B" + "k" * 86, "auth": "a" * 22}
+def sub_form(endpoint="https://push.example/pam-1", **over):
+    form = {"endpoint": endpoint, **KEYS}
+    form.update(over)
+    return form
+check("订阅接口：需要登录", anon.post("/settings/push/subscribe", data=sub_form()).status_code in (302, 400))
+check("订阅接口：需要 CSRF 令牌", pu.post("/settings/push/subscribe", data=sub_form()).status_code == 400)
+for label, bad in (("endpoint 不是 https", sub_form("http://push.example/x")), ("endpoint 太长", sub_form("https://push.example/" + "x" * 1000)),
+                   ("密钥含非法字符", sub_form(p256dh="not valid!" * 8)), ("密钥太短", sub_form(auth="ab"))):
+    check(f"订阅接口拒绝：{label}", post(pu, "/settings/push/subscribe", bad, headers=FETCH).status_code == 400)
+r = post(pu, "/settings/push/subscribe", sub_form(), headers=FETCH)
+with app.app_context():
+    subs = PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").all()
+check("订阅成功：登记这台设备（记下浏览器信息）", r.get_json() == {"ok": True} and len(subs) == 1 and subs[0].user_agent is not None)
+post(pu, "/settings/push/subscribe", sub_form(auth="b" * 22), headers=FETCH)
+with app.app_context():
+    check("同一台设备再次订阅：更新密钥，不会重复登记", PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").count() == 1
+          and PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").first().auth == "b" * 22)
+pu2 = app.test_client()
+register(pu2, "pat")
+post(pu2, "/settings/push/subscribe", sub_form(), headers=FETCH)
+with app.app_context():
+    owner = db.session.get(User, PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").first().user_id).username
+check("同一台设备换了账号登录：归到新账号名下，旧账号不会再收到推送", owner == "pat")
+post(pu2, "/settings/push/unsubscribe", {"endpoint": "https://push.example/pam-1"}, headers=FETCH)
+with app.app_context():
+    check("取消订阅真的删掉了", PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").count() == 0)
+post(pu, "/settings/push/subscribe", sub_form(), headers=FETCH)
+post(pu2, "/settings/push/unsubscribe", {"endpoint": "https://push.example/pam-1"}, headers=FETCH)
+with app.app_context():
+    check("不能取消别人的设备", PushSubscription.query.filter_by(endpoint="https://push.example/pam-1").count() == 1)
+for i in range(2, 11):
+    post(pu, "/settings/push/subscribe", sub_form(f"https://push.example/pam-{i}"), headers=FETCH)
+r = post(pu, "/settings/push/subscribe", sub_form("https://push.example/pam-11"), headers=FETCH)
+check("每个账号最多登记 10 台设备", r.status_code == 400 and "at most 10" in r.get_json()["error"])
+
+# ================= 9g. 通知设置 =================
+html = pu.get("/settings").get_data(as_text=True)
+check("Settings 有 Notifications 区域，带 VAPID 公钥、设备列表、时区", all(x in html for x in (
+    'id="notifications"', f'data-vapid-key="{public_key_value}"', "Daily summary", "Deadline reminders",
+    "Push notifications on this device", "Your time zone", "Asia/Kuala_Lumpur")))
+check("开发模式：如实告知邮件只打印在日志里", "Development mode" in html)
+check("没有验证邮箱：提示去验证，邮件开关是禁用的", "Add and confirm an email address" in html
+      and re.search(r'name="notify_email_digest"[^>]*disabled', html) is not None and re.search(r'name="notify_push_digest"[^>]*>', html))
+NOTIFY = {"timezone": "Asia/Kuala_Lumpur", "digest_hour": "8"}
+check("没验证邮箱就想开邮件通知：拒绝", "Confirm your email address first" in pu.get(post(pu, "/settings/notifications", dict(NOTIFY, notify_email_digest="1")).location).get_data(as_text=True)
+      and user_attr("pam", "notify_email_digest") is False)
+check("没有设备就想开推送：拒绝", "Enable push notifications on this device first" in pu2.get(post(pu2, "/settings/notifications", dict(NOTIFY, notify_push_digest="1")).location).get_data(as_text=True))
+check("无效时区被拒绝", "valid time zone" in pu.get(post(pu, "/settings/notifications", {"timezone": "Mars/Base", "digest_hour": "8"}).location).get_data(as_text=True))
+check("无效钟点被拒绝（0 到 21 点）", all("before 10 pm" in pu.get(post(pu, "/settings/notifications", {"timezone": "UTC", "digest_hour": h}).location).get_data(as_text=True)
+                                       for h in ("23", "-1")) and "valid time zone" in pu.get(post(
+    pu, "/settings/notifications", {"timezone": "UTC", "digest_hour": "abc"}).location).get_data(as_text=True))
+set_user("pam", email="pam@example.com", email_verified=True)
+post(pu, "/settings/notifications", dict(NOTIFY, timezone="Europe/London", digest_hour="7", notify_email_digest="1", notify_push_deadlines="1"))
+check("保存通知设置：时区、钟点、各个开关", (user_attr("pam", "timezone"), user_attr("pam", "digest_hour")) == ("Europe/London", 7)
+      and user_attr("pam", "notify_email_digest") and user_attr("pam", "notify_push_deadlines")
+      and not user_attr("pam", "notify_email_deadlines") and not user_attr("pam", "notify_push_digest"))
+html = pu.get("/settings").get_data(as_text=True)
+check("设置页反映已保存的状态", '<option value="Europe/London" selected>' in html and '<option value="7" selected>' in html
+      and re.search(r'name="notify_email_digest"[^>]*checked', html) is not None)
+check("通知设置的 POST 需要 CSRF", pu.post("/settings/notifications", data=NOTIFY).status_code == 400)
+
+# 发测试
+mailer.OUTBOX.clear()
+PUSHES.clear()
+html = pu.get(post(pu, "/settings/notifications/test", {"channel": "email"}).location).get_data(as_text=True)
+check("发测试邮件：收到，并如实说明开发模式下只是打印到日志", mailer.OUTBOX and mailer.OUTBOX[-1]["To"] == "pam@example.com"
+      and "printed in the server log" in html)
+html = pu.get(post(pu, "/settings/notifications/test", {"channel": "push"}).location).get_data(as_text=True)
+check("发测试推送：发给这个账号的所有设备", len(PUSHES) == 10 and "Notification sent to 10 devices" in html)
+PUSHES.clear()
+PUSH_FAIL["https://push.example/pam-2"] = WebPushException("gone", response=SimpleNamespace(status_code=404))
+post(pu, "/settings/notifications/test", {"channel": "push"})
+with app.app_context():
+    check("某台设备已失效：自动从数据库删除，其余照常发送", PushSubscription.query.filter_by(endpoint="https://push.example/pam-2").count() == 0
+          and len(PUSHES) == 10 and PushSubscription.query.filter_by(user_id=user_row("pam").id).count() == 9)
+PUSH_FAIL.clear()
+check("没有验证邮箱的账号：不能发测试邮件", "Verify your email" in pu2.get(post(pu2, "/settings/notifications/test", {"channel": "email"}).location).get_data(as_text=True))
+check("没有设备的账号：不能发测试推送", "No device is subscribed" in pu2.get(post(pu2, "/settings/notifications/test", {"channel": "push"}).location).get_data(as_text=True))
+login_throttle.reset_all()
+for _ in range(10):
+    post(pu, "/settings/notifications/test", {"channel": "email"})
+check("测试消息有频率限制", "Too many test messages" in pu.get(post(pu, "/settings/notifications/test", {"channel": "email"}).location).get_data(as_text=True))
+login_throttle.reset_all()
+
+# 移除设备
+with app.app_context():
+    dev_ids = [d.id for d in PushSubscription.query.filter_by(user_id=user_row("pam").id).all()]
+for did in dev_ids[:-1]:
+    post(pu, f"/settings/push/{did}/remove")
+check("别人不能移除我的设备", post(pu2, f"/settings/push/{dev_ids[-1]}/remove").status_code == 302
+      and user_attr("pam", "notify_push_deadlines") is True)
+post(pu, f"/settings/push/{dev_ids[-1]}/remove")
+check("最后一台设备被移除：推送开关自动关掉", user_attr("pam", "notify_push_deadlines") is False and user_attr("pam", "notify_email_digest") is True)
+
+# ================= 9h. 每日摘要和截止日提醒 =================
+from datetime import date as date_cls  # noqa: E402
+
+
+def disable_all():
+    with app.app_context():
+        User.query.update({"notify_email_digest": False, "notify_email_deadlines": False, "notify_push_digest": False, "notify_push_deadlines": False})
+        db.session.commit()
+
+
+def mk_user(name, tz="Asia/Kuala_Lumpur", hour=8, email=True, verified=True, flags=("ed", "ek", "pd", "pk"), devices=()):
+    with app.app_context():
+        u = User(username=name, email=f"{name}@example.com" if email else None, email_verified=verified, timezone=tz, digest_hour=hour,
+                 notify_email_digest="ed" in flags, notify_email_deadlines="ek" in flags,
+                 notify_push_digest="pd" in flags, notify_push_deadlines="pk" in flags)
+        u.set_password("secret12")
+        db.session.add(u)
+        db.session.flush()
+        for d in devices:
+            db.session.add(PushSubscription(user_id=u.id, endpoint=f"https://push.example/{d}", p256dh="k" * 87, auth="a" * 22))
+        db.session.commit()
+        return u.id
+
+
+def mk_project(uid, name, deadline, status="in_progress"):
+    with app.app_context():
+        p = Project(user_id=uid, name=name, description="x", deadline=deadline, status=status)
+        db.session.add(p)
+        db.session.commit()
+        return p.id
+
+
+def mk_task(pid, title, due, done=False, minutes=None):
+    with app.app_context():
+        db.session.add(Task(project_id=pid, title=title, due_date=due, done=done, minutes=minutes))
+        db.session.commit()
+
+
+def run_reminders(now):
+    mailer.OUTBOX.clear()
+    PUSHES.clear()
+    with app.app_context():
+        return reminders.run(now)
+
+
+def mails_to(address):
+    return [m for m in mailer.OUTBOX if m["To"] == address]
+
+
+def utc(*args):
+    return datetime(*args, tzinfo=dt_timezone.utc)
+
+
+disable_all()
+login_throttle.reset_all()
+rita = mk_user("rita", flags=("ed", "pd"), devices=["rita-1"])
+p_now = mk_project(rita, "Statistics Report", datetime(2030, 3, 30, 23, 59))
+p_today = mk_project(rita, "Lab Report", datetime(2030, 3, 10, 18, 0))
+p_sub = mk_project(rita, "Old Project", datetime(2030, 3, 30, 23, 59), status="submitted")
+mk_task(p_now, "Read the brief", date_cls(2030, 3, 10), minutes=60)
+mk_task(p_now, "Collect data", date_cls(2030, 3, 8))
+mk_task(p_now, "Already finished", date_cls(2030, 3, 10), done=True)
+mk_task(p_now, "Tomorrow's task", date_cls(2030, 3, 11))
+mk_task(p_sub, "Task of a submitted project", date_cls(2030, 3, 10))
+check("还没到设定的钟点（本地 07:30）：不发摘要", run_reminders(utc(2030, 3, 9, 23, 30))["emails"] == 0 and not mailer.OUTBOX and not PUSHES)
+stats = run_reminders(utc(2030, 3, 10, 0, 30))  # 吉隆坡 08:30
+msg = mails_to("rita@example.com")[0]
+body = mail_body(msg)
+check("到了钟点：发出摘要邮件和推送各一条", stats["emails"] == 1 and stats["pushes"] == 1 and len(PUSHES) == 1)
+check("摘要内容：今天的任务 + 逾期的任务 + 今天截止的项目；不含已完成、明天、已提交项目的任务",
+      msg["Subject"] == "Today: 2 tasks" and "Read the brief" in body and "Collect data" in body and "overdue" in body
+      and "Lab Report at 18:00" in body and "Already finished" not in body and "Tomorrow" not in body and "submitted project" not in body)
+check("邮件里的链接指向 Today 页面和 Settings", "http://127.0.0.1:5000/today" in body and "http://127.0.0.1:5000/settings" in body
+      and "<li" in msg.get_body(("html",)).get_content())
+pl = json.loads(PUSHES[0]["data"])
+check("推送内容：标题是任务数，正文是前两个任务，点击打开 /today", pl["title"] == "2 tasks for today" and "Read the brief" in pl["body"]
+      and pl["url"] == "/today" and pl["tag"] == "digest")
+with app.app_context():
+    log = NotificationLog.query.filter_by(user_id=rita, kind="digest").first()
+check("记录已发送：同一天只发一次", log and log.ref_key == "2030-03-10" and log.channels == "email,push")
+stats = run_reminders(utc(2030, 3, 10, 1, 30))
+check("同一天再次运行：不会重复发送", stats["emails"] == 0 and stats["pushes"] == 0 and not mailer.OUTBOX)
+check("第二天会再发一次", run_reminders(utc(2030, 3, 11, 0, 30))["emails"] == 1)
+check("晚上 22 点之后不再补发当天的摘要", run_reminders(utc(2030, 3, 12, 14, 30))["emails"] == 0)  # 吉隆坡 22:30
+os.environ["APP_BASE_URL"] = "https://app.example.com/"
+run_reminders(utc(2030, 3, 13, 0, 30))
+check("设置 APP_BASE_URL 后邮件链接用线上地址", "https://app.example.com/today" in mail_body(mails_to("rita@example.com")[0]))
+os.environ.pop("APP_BASE_URL")
+
+# 今天没有任何要提醒的：不发，只记一笔
+disable_all()
+sam = mk_user("sam", flags=("ed", "pd"), devices=["sam-1"])
+stats = run_reminders(utc(2030, 5, 1, 0, 30))
+with app.app_context():
+    logged = NotificationLog.query.filter_by(user_id=sam, kind="digest").count()
+check("今天没有任务也没有截止日：不发邮件不推送，只记录", stats["skipped"] == 1 and not mailer.OUTBOX and not PUSHES and logged == 1)
+mk_task(mk_project(sam, "Late Add", datetime(2030, 6, 1)), "Added later", date_cls(2030, 5, 1))
+check("当天晚些时候才加的任务：不会补发（今天已经处理过）", run_reminders(utc(2030, 5, 1, 4, 0))["emails"] == 0)
+
+# 渠道偏好和可用性
+disable_all()
+only_email = mk_user("oem", flags=("ed",), devices=["oem-1"])
+no_verify = mk_user("nvu", flags=("ed", "pd"), verified=False, devices=["nvu-1"])
+no_device = mk_user("ndv", flags=("ed", "pd"))
+for uid in (only_email, no_verify, no_device):
+    mk_task(mk_project(uid, f"P{uid}", datetime(2031, 1, 1)), f"Task {uid}", date_cls(2030, 6, 1))
+run_reminders(utc(2030, 6, 1, 0, 30))
+push_endpoints = [p["subscription_info"]["endpoint"] for p in PUSHES]
+check("只开了邮件的用户：只发邮件，不推送", len(mails_to("oem@example.com")) == 1 and "https://push.example/oem-1" not in push_endpoints)
+check("邮箱没验证：不发邮件，推送照发", not mails_to("nvu@example.com") and "https://push.example/nvu-1" in push_endpoints)
+check("没有设备：只发邮件", len(mails_to("ndv@example.com")) == 1 and not any("ndv" in e for e in push_endpoints))
+os.environ["MAIL_BACKEND"] = "off"
+run_reminders(utc(2030, 6, 2, 0, 30))
+check("服务器关闭邮件时：不发邮件", not mailer.OUTBOX)
+os.environ.pop("MAIL_BACKEND")
+
+# 邮件发送失败：不记录，下次再试
+disable_all()
+fay = mk_user("fay", flags=("ed",))
+mk_task(mk_project(fay, "Fay Project", datetime(2031, 1, 1)), "Fay task", date_cls(2030, 7, 1))
+real_send = mailer.send
+
+
+def broken_send(*a, **k):
+    raise mailer.MailError("down")
+
+
+mailer.send = broken_send
+stats = run_reminders(utc(2030, 7, 1, 0, 30))
+with app.app_context():
+    logged = NotificationLog.query.filter_by(user_id=fay).count()
+check("邮件服务暂时不可用：不会记为已发送，错误被计数", stats["errors"] == 1 and logged == 0)
+mailer.send = real_send
+stats = run_reminders(utc(2030, 7, 1, 1, 30))
+check("服务恢复后下一次运行补发", stats["emails"] == 1 and len(mails_to("fay@example.com")) == 1)
+
+# 各自的时区
+disable_all()
+tom = mk_user("tom", tz="Europe/London", flags=("ed",))
+mk_task(mk_project(tom, "London Project", datetime(2031, 1, 1)), "London task", date_cls(2030, 8, 1))
+kl = mk_user("kel", tz="Asia/Kuala_Lumpur", flags=("ed",))
+mk_task(mk_project(kl, "KL Project", datetime(2031, 1, 1)), "KL task", date_cls(2030, 8, 1))
+run_reminders(utc(2030, 8, 1, 0, 30))  # 吉隆坡 08:30，伦敦（夏令时）01:30
+check("按各自的时区：同一时刻吉隆坡 08:30 收到，伦敦 01:30 还没有", len(mails_to("kel@example.com")) == 1 and not mails_to("tom@example.com"))
+run_reminders(utc(2030, 8, 1, 7, 30))  # 伦敦夏令时 08:30
+check("伦敦的 08:30 才轮到伦敦的用户，吉隆坡的不会重复", len(mails_to("tom@example.com")) == 1 and not mails_to("kel@example.com"))
+
+# 截止日提醒
+disable_all()
+dee = mk_user("dee", flags=("ek", "pk"), devices=["dee-1"])
+d1 = mk_project(dee, "Capstone Proposal", datetime(2030, 4, 3, 22, 0))  # 吉隆坡 22:00 = UTC 14:00
+mk_project(dee, "Past Project", datetime(2030, 3, 1, 12, 0))
+mk_project(dee, "Submitted Project", datetime(2030, 4, 3, 23, 0), status="submitted")
+mk_project(dee, "Far Away", datetime(2030, 9, 1, 12, 0))
+check("距离截止还有 98 小时：不提醒", run_reminders(utc(2030, 3, 30, 12, 0))["emails"] == 0)
+stats = run_reminders(utc(2030, 4, 1, 0, 0))  # 还有 62 小时
+msg = mails_to("dee@example.com")[0]
+check("截止前 72 小时内：提醒一次（邮件 + 推送）；已过期、已提交、很远的项目都不提醒",
+      stats["emails"] == 1 and stats["pushes"] == 1 and msg["Subject"] == "Deadline soon: Capstone Proposal"
+      and "due in about 3 days" in mail_body(msg) and "Past Project" not in mail_body(msg) and "Submitted" not in mail_body(msg)
+      and "Far Away" not in mail_body(msg))
+check("推送：标题是项目名，点击打开 Next 6 days", json.loads(PUSHES[0]["data"])["title"] == "Deadline soon: Capstone Proposal"
+      and json.loads(PUSHES[0]["data"])["url"] == "/upcoming" and json.loads(PUSHES[0]["data"])["tag"] == "deadline")
+check("同一档不会重复提醒", run_reminders(utc(2030, 4, 1, 6, 0))["emails"] == 0)
+stats = run_reminders(utc(2030, 4, 2, 16, 0))  # 还有 22 小时
+check("进入 24 小时：再提醒一次", stats["emails"] == 1 and "about 22 hours" in mail_body(mails_to("dee@example.com")[0]))
+check("24 小时那档也只提醒一次", run_reminders(utc(2030, 4, 3, 2, 0))["emails"] == 0)
+with app.app_context():
+    kinds = sorted(l.kind for l in NotificationLog.query.filter_by(user_id=dee).all())
+check("记录了两档提醒", kinds == ["deadline-1d", "deadline-3d"])
+with app.app_context():
+    db.session.get(Project, d1).deadline = datetime(2030, 4, 3, 21, 0)
+    db.session.commit()
+check("改了截止时间：算新的截止日，重新提醒", run_reminders(utc(2030, 4, 3, 2, 0))["emails"] == 1)
+# 一次有多个项目：合成一封邮件
+disable_all()
+dan = mk_user("dan", flags=("ek",))
+mk_project(dan, "Essay A", datetime(2030, 10, 3, 22, 0))
+mk_project(dan, "Essay B", datetime(2030, 10, 3, 23, 0))
+run_reminders(utc(2030, 10, 1, 0, 0))
+check("同时有多个项目临近截止：合并成一封邮件", len(mails_to("dan@example.com")) == 1
+      and mails_to("dan@example.com")[0]["Subject"] == "2 deadlines coming up" and "Essay A" in mail_body(mails_to("dan@example.com")[0])
+      and "Essay B" in mail_body(mails_to("dan@example.com")[0]))
+# 失效的推送设备被清掉
+disable_all()
+gil = mk_user("gil", flags=("pk",), devices=["gil-a", "gil-b"])
+mk_project(gil, "Gil Project", datetime(2030, 11, 3, 22, 0))
+PUSH_FAIL["https://push.example/gil-a"] = WebPushException("gone", response=SimpleNamespace(status_code=410))
+stats = run_reminders(utc(2030, 11, 1, 0, 0))
+with app.app_context():
+    left = [s.endpoint for s in PushSubscription.query.filter_by(user_id=gil).all()]
+check("一台设备失效：删掉它，另一台照常收到", stats["pushes"] == 1 and left == ["https://push.example/gil-b"])
+PUSH_FAIL["https://push.example/gil-b"] = WebPushException("gone", response=SimpleNamespace(status_code=410))
+disable_all()
+set_user("gil", notify_push_deadlines=True)
+mk_project(gil, "Gil Second", datetime(2030, 12, 3, 22, 0))
+stats = run_reminders(utc(2030, 12, 1, 0, 0))
+with app.app_context():
+    left = PushSubscription.query.filter_by(user_id=gil).count()
+    logged = NotificationLog.query.filter_by(user_id=gil, kind="deadline-3d").count()
+check("所有设备都失效：设备被清空，这条提醒不记为已发送", left == 0 and logged == 1 and stats["pushes"] == 0)
+PUSH_FAIL.clear()
+# 一个用户出错不影响别人
+disable_all()
+bad = mk_user("bad", flags=("ed",))
+good = mk_user("goo", flags=("ed",))
+for uid in (bad, good):
+    mk_task(mk_project(uid, f"P{uid}", datetime(2031, 1, 1)), f"T{uid}", date_cls(2031, 2, 1))
+orig_digest_items = reminders.digest_items
+
+
+def flaky(user, tz, local_now):
+    if user.id == bad:
+        raise RuntimeError("boom")
+    return orig_digest_items(user, tz, local_now)
+
+
+reminders.digest_items = flaky
+stats = run_reminders(utc(2031, 2, 1, 0, 30))
+reminders.digest_items = orig_digest_items
+check("一个用户处理出错：不影响其他人，错误被计数", stats["errors"] == 1 and len(mails_to("goo@example.com")) == 1)
+disable_all()
+check("所有通知都关闭的用户：完全不处理", run_reminders(utc(2031, 2, 2, 0, 30))["users"] == 0)
+
+# ---------- 定时入口 ----------
+check("cron 入口：没设置 REMINDER_TOKEN 时 404（默认关闭）", anon.post("/cron/reminders").status_code == 404)
+os.environ["REMINDER_TOKEN"] = "cron-secret-token"
+check("cron 入口：没带令牌 / 令牌不对 -> 404", anon.post("/cron/reminders").status_code == 404
+      and anon.post("/cron/reminders", headers={"Authorization": "Bearer wrong"}).status_code == 404
+      and anon.post("/cron/reminders", headers={"Authorization": "cron-secret-token"}).status_code == 404)
+r = anon.post("/cron/reminders", headers={"Authorization": "Bearer cron-secret-token"})
+check("cron 入口：令牌正确（不需要 CSRF）-> 运行并返回统计", r.status_code == 200 and set(r.get_json()) == {"users", "emails", "pushes", "skipped", "errors"})
+check("cron 入口只接受 POST", anon.get("/cron/reminders").status_code == 405)
+os.environ.pop("REMINDER_TOKEN")
+fresh = Path(TMP, "cron.db")
+env2 = dict(os.environ, DATABASE_URL="sqlite:///" + fresh.as_posix(), SECRET_KEY="x")
+env2.pop("GEMINI_API_KEY", None)
+result = subprocess.run([sys.executable, "send_reminders.py"], cwd=str(Path(__file__).resolve().parent), env=env2, capture_output=True, text=True)
+check("send_reminders.py：可以直接运行，输出统计 JSON，退出码 0", result.returncode == 0
+      and json.loads(result.stdout.strip().splitlines()[-1])["users"] == 0, result.stderr[-300:])
+
+# ---------- 删除账号、导出 ----------
+dele = app.test_client()
+register(dele, "del-me")
+did = user_row("del-me").id
+post(dele, "/settings/push/subscribe", sub_form("https://push.example/del-1"), headers=FETCH)
+with app.app_context():
+    db.session.add(NotificationLog(user_id=did, kind="digest", ref_key="2030-01-01", channels="email"))
+    db.session.commit()
+r = post(dele, "/settings/export")
+data = json.loads(r.get_data(as_text=True))
+check("导出包含通知设置和邮箱验证状态，但不含推送密钥", data["account"]["email_verified"] is False and data["account"]["notifications"]["timezone"] == "UTC"
+      and data["account"]["notifications"]["push_devices"] == 1 and "https://push.example" not in r.get_data(as_text=True))
+post(dele, "/settings/delete", {"confirm_username": "del-me", "current_password": "secret12"})
+with app.app_context():
+    check("删除账号：推送订阅和提醒记录也一起删除", PushSubscription.query.filter_by(user_id=did).count() == 0
+          and NotificationLog.query.filter_by(user_id=did).count() == 0)
+
+check("隐私说明里写了邮件和推送", "Email and push" in mia.get("/settings").get_data(as_text=True))
+mailer.OUTBOX.clear()
+login_throttle.reset_all()
+
 # ================= 10. 旧数据库升级（v1 -> 重组后的版本）：真正调用 ensure_schema =================
 import subprocess  # noqa: E402
 
@@ -1387,6 +2122,9 @@ indexes = {r[1] for r in con.execute("PRAGMA index_list(project)")}
 user_cols = {r[1]: r for r in con.execute("PRAGMA table_info(user)")}
 user_indexes = {r[1]: r[2] for r in con.execute("PRAGMA index_list(user)")}
 old_user_has_password = con.execute("SELECT has_password, email, google_sub FROM user").fetchall()
+old_notify = con.execute("SELECT email_verified, timezone, digest_hour, notify_email_digest, notify_email_deadlines, "
+                         "notify_push_digest, notify_push_deadlines FROM user").fetchall()
+new_tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 con.close()
 check("旧表补上新列，旧记录和用户都保留",
       {"diagnosis_json", "framework_json", "content_fingerprint", "requirements_check_id"} <= cols and sessions == 1
@@ -1396,6 +2134,8 @@ check("旧项目得到默认值（other / individual / 空 guideline），描述
 check("补上 (user_id, deadline) 索引", "ix_project_user_deadline" in indexes)
 check("旧用户表补上 email / google_sub / has_password / created_at，旧用户保持“有密码”",
       {"email", "google_sub", "has_password", "created_at"} <= set(user_cols) and old_user_has_password == [(1, None, None)])
+check("旧用户得到通知默认值：邮箱未验证、时区 UTC、8 点、全部关闭；新增推送订阅和提醒记录表",
+      old_notify == [(0, "UTC", 8, 0, 0, 0, 0)] and {"push_subscription", "notification_log"} <= new_tables)
 check("email 和 google_sub 有唯一索引", user_indexes.get("ix_user_email") == 1 and user_indexes.get("ix_user_google_sub") == 1)
 check("升级后的旧项目能正常打开 Overview 和项目页", result.stdout.strip().endswith("200 200"), result.stdout + result.stderr[-300:])
 

@@ -7,10 +7,12 @@ import re
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from sqlalchemy.exc import IntegrityError
 
-from .. import login_throttle, validators
+from .. import account_mail, login_throttle, tokens, validators
+from .. import emails
+from ..constants import EMAIL_REQUEST_LIMIT
 from ..extensions import db
 from ..models import User
-from ..services import google_auth
+from ..services import google_auth, mailer
 from ..services.google_auth import GoogleAuthError
 
 bp = Blueprint("auth", __name__)
@@ -81,6 +83,63 @@ def logout():
     return redirect(url_for("auth.login"))
 
 
+# ======================= 忘记密码 / 验证邮箱 =======================
+def too_many(key_kinds):
+    return any(login_throttle.seconds_blocked(k) for k in key_kinds)
+
+
+@bp.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    """输入邮箱，收到重置链接。无论邮箱存不存在、有没有验证，页面和回复都一样，不泄露哪些邮箱注册过。"""
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        keys = (f"forgot-ip|{request.remote_addr}", f"forgot-email|{email}")
+        if too_many(keys):
+            flash("Too many requests. Please wait a few minutes and try again.", "error")
+            return render_template("pages/forgot_password.html", email=email, mail_enabled=mailer.enabled())
+        for k in keys:
+            login_throttle.record_failure(k, limit=EMAIL_REQUEST_LIMIT)  # 每次请求都计数（限制发信频率，防止被用来骚扰别人）
+        user = User.query.filter_by(email=email).first() if email else None
+        if user and user.email_verified and mailer.enabled():
+            account_mail.send_reset(user)
+        return render_template("pages/forgot_password.html", sent=True, email=email, mail_enabled=mailer.enabled())
+    return render_template("pages/forgot_password.html", mail_enabled=mailer.enabled())
+
+
+@bp.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    user = tokens.read_reset_token(token)
+    if user is None:
+        return render_template("pages/reset_password.html", invalid=True), 400
+    if request.method == "POST":
+        new, confirm = request.form.get("new_password", ""), request.form.get("confirm_password", "")
+        error = validators.check_password(new)
+        if error is None and new != confirm:
+            error = "The two passwords don't match."
+        if error:
+            return render_template("pages/reset_password.html", token=token, error=error)
+        user.set_password(new)  # 令牌里绑着旧密码的指纹，所以这个链接现在失效了
+        db.session.commit()
+        account_mail.send_notice(user, emails.password_changed(user, "reset"))
+        login_throttle.reset(login_throttle.login_key(user.username))
+        flash("Your password was reset. Log in with the new password.", "success")
+        return redirect(url_for("auth.login"))
+    return render_template("pages/reset_password.html", token=token)
+
+
+@bp.route("/verify-email/<token>")
+def verify_email(token):
+    user = tokens.read_verify_token(token)
+    if user is None:
+        flash("This confirmation link is invalid or has expired. Request a new one from Settings.", "error")
+        return redirect(url_for("settings.index") if session.get("user_id") else url_for("auth.login"))
+    validators.release_unverified(user.email, user)
+    user.email_verified = True
+    db.session.commit()
+    flash("Your email address is confirmed.", "success")
+    return redirect(url_for("settings.index") + "#profile" if session.get("user_id") == user.id else url_for("auth.login"))
+
+
 # ======================= Google 登录 =======================
 def redirect_uri():
     """必须和 Google Cloud Console 里登记的“已授权的重定向 URI”一字不差。部署在代理后面时用 GOOGLE_REDIRECT_URI 指定。"""
@@ -138,12 +197,21 @@ def google_callback():
     if user:  # 已经连接过：直接登录
         start_session(user)
         return redirect(url_for("overview.index"))
-    if User.query.filter_by(email=profile["email"]).first():
-        # 不自动合并：本站的邮箱是用户自己填的、没验证过，自动合并会让别人用你的邮箱抢你的账号
-        flash("An account with this email already exists. Log in with your password, then connect Google "
-              "in Settings.", "error")
-        return redirect(url_for("auth.login"))
-    user = User(username=username_from(profile), email=profile["email"], google_sub=profile["sub"])
+    existing = User.query.filter_by(email=profile["email"]).first()
+    if existing and existing.email_verified:
+        # 两边都验证过这个邮箱，可以安全地把 Google 连到已有的账号上
+        if existing.google_sub:
+            flash("That email belongs to an account connected to a different Google account.", "error")
+            return redirect(url_for("auth.login"))
+        existing.google_sub = profile["sub"]
+        db.session.commit()
+        start_session(existing)
+        flash("Google was connected to your existing account.", "success")
+        return redirect(url_for("overview.index"))
+    if existing:
+        # 对方只是自己填了这个邮箱、没验证过，不能凭它抢走账号；Google 验证过的邮箱优先，把没验证的占用拿掉
+        validators.release_unverified(profile["email"])
+    user = User(username=username_from(profile), email=profile["email"], email_verified=True, google_sub=profile["sub"])
     user.set_unusable_password()
     db.session.add(user)
     try:
@@ -167,8 +235,13 @@ def link_google(profile):
         flash("That Google account is already connected to another account.", "error")
         return redirect(back_to("link"))
     user.google_sub = profile["sub"]
-    if not user.email and not User.query.filter_by(email=profile["email"]).first():
-        user.email = profile["email"]
+    if user.email == profile["email"]:
+        user.email_verified = True  # Google 已经证明这个邮箱属于同一个人
+    elif not user.email:
+        holder = User.query.filter_by(email=profile["email"]).first()
+        if holder is None or (not holder.email_verified and holder.id != user.id):
+            validators.release_unverified(profile["email"], user)
+            user.email, user.email_verified = profile["email"], True
     db.session.commit()
     flash("Google account connected. You can now log in with Google.", "success")
     return redirect(back_to("link"))

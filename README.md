@@ -22,8 +22,9 @@ Paper Finder and Report Drafter are hidden for *Portfolio* and *Exam preparation
 
 ## Features
 
-- **Accounts**: register / login / logout with salted password hashes, or **Continue with Google** (sign in or sign up). Failed logins are rate-limited per username and address.
-- **Settings**: change username and optional email; change password (or set one if you signed up with Google); connect or disconnect Google; light / dark theme; a plain-language **Privacy & data** section; **Download my data** (JSON); **Delete account** (removes everything).
+- **Accounts**: register / login / logout with salted password hashes, or **Continue with Google** (sign in or sign up). Failed logins are rate-limited per username and address. **Forgot password** emails a one-time reset link (1 hour), and password or email changes send a security notice.
+- **Email and push notifications**: confirm your email, then choose a **daily summary** (today's tasks, overdue tasks, deadlines today, at the hour you pick in your own time zone) and **deadline reminders** (3 days and 1 day before), each by email, push, or both. Push works per device (Chrome, Edge, Firefox, Android; Safari and iPhone once the site is added to the Home Screen). Nothing is on until you turn it on.
+- **Settings**: change username and optional email (confirmed by link); change password (or set one if you signed up with Google); connect or disconnect Google; notification settings and devices; light / dark theme; a plain-language **Privacy & data** section; **Download my data** (JSON); **Delete account** (removes everything).
 - **Projects**: name, deadline, description (the task itself), guideline / marking rubric, type, individual or group, citation style. Live character counters.
 - **Overview**: a status ring (Not started / In progress / Ready to submit) with counts, today's and the next six days' task counts, then one card per project with a status filter.
 - **Today** and **Next 6 days**: tasks across all projects, grouped by day, ticked off in place.
@@ -45,6 +46,13 @@ app/
   validators.py            username / password / email rules shared by sign-up, Settings and Google sign-up
   login_throttle.py        in-memory limit on repeated failed logins and password checks
   data_export.py           builds the "Download my data" file
+  tokens.py                signed one-time links for email confirmation and password reset (no extra table)
+  emails.py                the text and HTML of every email
+  account_mail.py          sends confirmation, reset and security emails
+  reminders.py             daily summary and deadline reminders, per user time zone, never sent twice
+  urls.py                  full links for emails and push (APP_BASE_URL)
+send_reminders.py          run this on a schedule (hourly) to send reminders
+generate_vapid_keys.py     prints a VAPID key pair for push
   constants.py             statuses, types, length limits, thresholds (one place to tune)
   tools_registry.py        the five tools, their order and visibility
   schema.py                ensure_schema(): new tables, missing columns, indexes
@@ -56,6 +64,8 @@ app/
     openalex_client.py     the only module that talks to OpenAlex
     privacy.py             masks emails and phone numbers before text reaches the AI
     google_auth.py         the only module that talks to Google OAuth (authorization code + PKCE)
+    mailer.py              the only module that sends email (any SMTP service, or a console mode for development)
+    push.py                the only module that sends Web Push (VAPID keys, encryption via pywebpush)
     common.py              shared helpers: project block (data, not instructions), input-size check, quote check
     requirements_checker.py  Requirements Checklist: pre-scan, rounds, validation, context for later tools
     prompt_generator.py    framework generation and code-assembled final prompt
@@ -88,6 +98,8 @@ check_models.py            checks which Gemini models currently work
 - **Works without JavaScript.** Every action is a normal form POST; `app.js` upgrades it to an in-place update (requests carry `X-Requested-With: fetch` and get JSON back). The `next` redirect target is restricted to same-site paths.
 - **Motion has a job.** Animations mark a state change (tick, progress, new row, dialog, AI waiting) and are switched off under `prefers-reduced-motion`. Status is always shown as text too, never by colour alone.
 - **Google sign-in is hard to abuse.** Authorization code flow with a random `state` (checked in constant time, single use) and PKCE; the client secret never reaches the browser; accounts are matched by Google's stable ID, not the email; only Google-verified emails are accepted. A Google email that matches an existing password account is **not** merged automatically (emails entered here are unverified, so merging would let someone take over an account by registering with its email): the user logs in and connects Google from Settings instead.
+- **Email links can't be abused.** Confirmation links are bound to the exact address and expire after 3 days; reset links expire after an hour and are bound to the current password, so the first use (or any password change) kills them. "Forgot password" gives the same answer whether or not the address exists, and requests are rate-limited so it can't be used to spam someone. An email typed in by one user but never confirmed doesn't block the person who really owns that address.
+- **Reminders are idempotent.** Every sent reminder is recorded (user, kind, project and deadline), so running the job twice, or late, never repeats one; a failed send isn't recorded and is retried on the next run. Dead push subscriptions (HTTP 404/410) are deleted automatically.
 - **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project and child record (other users get 404), identical error for unknown user vs wrong password, Jinja auto-escaping.
 - **Schema upgrades without data loss.** `ensure_schema()` runs inside `create_app()`, so any start-up path works on a fresh database. Missing columns are added with `ALTER TABLE ... ADD COLUMN`; columns and tables are never dropped. Old projects get `type = other`, `individual` and an empty guideline.
 
@@ -108,18 +120,33 @@ Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex
 
 Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. Never enable it on a public server: the Werkzeug debugger can run code.
 
+## Your setup checklist
+
+Everything below is optional: without it the app still runs, and each feature explains what's missing.
+
+1. **Google sign-in**: create an OAuth client in Google Cloud Console, add the redirect URI, put `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` (see above).
+2. **Email**: pick an SMTP service (for Gmail: turn on 2-step verification, create an *App password*), fill `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM` in `.env`, restart, then use *Settings > Notifications > Send a test email*. Until then emails are printed in the server log.
+3. **Push**: nothing to do on a laptop (keys are generated into `instance/vapid.json`). For a real deployment run `python generate_vapid_keys.py`, put both lines in the host's environment variables, and serve the site over **https** (browsers only allow push on https or localhost).
+4. **Reminders need a schedule**: something must run `python send_reminders.py` every hour.
+   - Windows (Task Scheduler): `schtasks /Create /SC HOURLY /TN AssignmentHelperReminders /TR "cmd /c cd /d C:\path\to\assignment-helper && venv\Scripts\python.exe send_reminders.py"`
+   - Linux / macOS (cron): `0 * * * * cd /path/to/assignment-helper && venv/bin/python send_reminders.py`
+   - Hosts without cron: set `REMINDER_TOKEN` and have the host's scheduler call `POST /cron/reminders` with the header `Authorization: Bearer <token>`.
+5. **Deployment**: set `APP_BASE_URL` (the public https address) so links in emails and notifications are right, and keep `FLASK_DEBUG` off.
+6. **Try it on your own devices**: confirm your email, turn on push in your browser, set your time zone, and send yourself a test email and a test push. On an iPhone, add the site to the Home Screen first.
+
 ## Tests
 
 ```bash
 python test_app.py
 ```
 
-330 checks covering the Google flow against a mocked Google (PKCE, state, replay, unverified email, no automatic merge, linking, disconnecting), every Settings action, login throttling, the data export and account deletion,  the Requirements Checklist (pre-scan, rounds, conflict evidence, the internal round cap, finishing with assumptions, stale detection), the Prompt Generator (blocked by open conflicts, decisions, corrections, the code-built prompt and what it must and must not contain), the Report Drafter (outline, unlock order, invented citations removed, needs-source flags, APA and IEEE),  auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
+464 checks covering the email service (console and SMTP, failures, header injection), confirmation and reset links (expiry, tampering, single use, no account enumeration, rate limits), the push service including real encryption and VAPID signatures checked by a simulated browser, subscriptions, notification settings, the reminder engine (time zones, once per day, 72 / 24 hour deadlines, failures retried, dead devices removed), the cron entry point, the Google flow against a mocked Google (PKCE, state, replay, unverified email, no automatic merge, linking, disconnecting), every Settings action, login throttling, the data export and account deletion,  the Requirements Checklist (pre-scan, rounds, conflict evidence, the internal round cap, finishing with assumptions, stale detection), the Prompt Generator (blocked by open conflicts, decisions, corrections, the code-built prompt and what it must and must not contain), the Report Drafter (outline, unlock order, invented citations removed, needs-source flags, APA and IEEE),  auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
 
 ## Known limits
 
 - AI-generated content (questions, frameworks, drafts) is written in English.
-- Forgotten passwords can't be reset by email yet (the app sends no email); the Google button is the recovery route for accounts that have one connected.
+- Reminders only go out when the scheduled job runs, so they are as punctual as that schedule (hourly is recommended). If two copies of the job run at the same moment, a reminder could in rare cases be sent twice.
+- Push on iPhone only works once the site is added to the Home Screen (an Apple limitation).
 - Harvard, MLA and Chicago reference entries use a simplified format; check them against the guideline.
 - Drag-to-reorder doesn't work on touch screens; AI calls are synchronous; not deployed yet.
 - The description/guideline limits (20,000 / 8,000 characters, 26,000 sent to the AI) are tentative.

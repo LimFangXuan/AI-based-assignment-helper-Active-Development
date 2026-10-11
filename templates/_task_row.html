@@ -1,0 +1,28 @@
+{# 一个步骤。agenda=True 时用在 Dashboard 的“今天 / 本周”里：显示所属项目，不能拖拽、编辑或删除 #}
+{% set late = task.due_date and task.due_date < today and not task.done %}
+<li class="task {% if task.done %}is-done{% endif %}" data-id="{{ task.id }}"
+    data-update-url="{{ url_for('task_update', project_id=task.project_id, task_id=task.id) }}"
+    data-title="{{ task.title }}" data-due="{{ task.due_date.isoformat() if task.due_date else '' }}"
+    data-minutes="{{ task.minutes or '' }}">
+  {% if not agenda %}<span class="drag-handle" title="拖动排序" aria-hidden="true"><i class="ph ph-dots-six-vertical"></i></span>{% endif %}
+  <form class="toggle-form" method="POST" action="{{ url_for('task_toggle', project_id=task.project_id, task_id=task.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {% if agenda %}<input type="hidden" name="next" value="{{ url_for('dashboard') }}">{% endif %}
+    <button class="check" type="submit" aria-label="{{ '取消完成' if task.done else '标记完成' }}：{{ task.title }}">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>
+    </button>
+  </form>
+  <div class="body">
+    <span class="title">{{ task.title }}</span>
+    <div class="sub">{% if task.due_date %}<span class="pill {% if late %}overdue{% elif task.due_date == today %}accent{% endif %}"><i class="ph ph-calendar-blank"></i>{{ task.due_date | relday }}{% if late %}（逾期）{% endif %}</span>{% endif %}{% if task.minutes %}<span class="pill"><i class="ph ph-timer"></i>{{ task.minutes }} 分钟</span>{% endif %}{% if agenda %}<a class="proj" href="{{ url_for('project_detail', project_id=task.project_id) }}#tasks">{{ task.project.name }}</a>{% endif %}</div>
+  </div>
+  {% if not agenda %}
+  <div class="actions">
+    <button class="icon-btn" type="button" data-edit aria-label="编辑步骤" title="编辑（也可以双击标题）"><i class="ph ph-pencil-simple"></i></button>
+    <form class="delete-form" method="POST" action="{{ url_for('task_delete', project_id=task.project_id, task_id=task.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="icon-btn danger" type="submit" aria-label="删除步骤" title="删除"><i class="ph ph-trash"></i></button>
+    </form>
+  </div>
+  {% endif %}
+</li>

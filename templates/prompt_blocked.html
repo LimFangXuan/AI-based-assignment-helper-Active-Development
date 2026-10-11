@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}还有冲突没解决 - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
+<a class="back-link" href="{{ url_for('project_detail', project_id=project.id) }}#ai"><i class="ph ph-arrow-left"></i>返回项目</a>
 {% set current = 2 %}{% include "_stepper.html" %}
 <h1>还有冲突没解决，所以没有生成 Prompt</h1>
 <p class="muted">项目：{{ project.name }}</p>
@@ -13,15 +15,15 @@
     </div>
   {% endfor %}
   <h2 style="margin-top:18px;">你可以这样做</h2>
-  <form method="POST" action="{{ url_for('prompt_revise', project_id=project.id, session_id=ps.id) }}">
+  <form method="POST" action="{{ url_for('prompt_revise', project_id=project.id, session_id=ps.id) }}"
+        data-ai="正在读你的补充说明|正在重新判断冲突是否解决">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <label for="notes" style="margin-top:0;">补充说明（例如：老师已通过邮件书面允许；或者我决定改成另一个方向）</label>
     <textarea id="notes" name="notes" rows="3" maxlength="1000"></textarea>
-    <p><button class="btn" type="submit">提交说明，重新判断</button></p>
+    <div class="btn-row" style="margin-top:12px;"><button class="btn" type="submit">提交说明，重新判断</button>
+    <a class="btn secondary" href="{{ url_for('edit_project', project_id=project.id) }}">编辑项目描述</a>
+    <a class="btn ghost" href="{{ url_for('prompt_view', project_id=project.id, session_id=ps.id, retry=1) }}">重新回答问题</a></div>
   </form>
-  <a class="btn secondary" href="{{ url_for('edit_project', project_id=project.id) }}">编辑项目描述</a>
-  <a class="btn secondary" href="{{ url_for('prompt_view', project_id=project.id, session_id=ps.id, retry=1) }}">重新回答问题</a>
 </div>
 {% include "_diagnosis.html" %}
-<p><a href="{{ url_for('project_detail', project_id=project.id) }}">← 返回项目</a></p>
 {% endblock %}

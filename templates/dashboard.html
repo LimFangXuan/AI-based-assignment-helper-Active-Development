@@ -1,25 +1,97 @@
 {% extends "base.html" %}
+{% from "_macros.html" import ring, deadline_pill %}
 {% block content %}
-<div class="header-row">
-  <h1>我的作业</h1>
-  <a class="btn" href="{{ url_for('new_project') }}">+ 创建项目</a>
-</div>
-<div class="card">
-  <div class="legend">
-    <span><i class="bullet not_started"></i>未开始</span>
-    <span><i class="bullet in_progress"></i>进行中</span>
-    <span><i class="bullet done"></i>已完成（未提交）</span>
+{% set hour = now.hour %}
+<div class="page-head reveal">
+  <div>
+    <h1>{{ '早上好' if hour < 12 else ('下午好' if hour < 18 else '晚上好') }}，{{ g.user.username }}</h1>
+    <p class="sub">{{ today.month }}月{{ today.day }}日 周{{ "一二三四五六日"[today.weekday()] }}。先做今天的，再看这周的。</p>
   </div>
-  {% for p in projects %}
-    <div class="project-row">
-      <i class="bullet {{ p.status }}" title="{{ STATUS_LABELS[p.status] }}"></i>
-      <a class="name" href="{{ url_for('project_detail', project_id=p.id) }}">{{ p.name }}</a>
-      <span class="muted {% if p.deadline < now and p.status != 'done' %}overdue{% endif %}">
-        {% if p.deadline < now and p.status != 'done' %}已逾期 · {% endif %}截止 {{ p.deadline.strftime('%Y-%m-%d %H:%M') }}
-      </span>
+  <a class="btn" href="{{ url_for('new_project') }}"><i class="ph ph-plus"></i>创建项目</a>
+</div>
+
+<div class="stats reveal">
+  <div class="stat"><div class="value"><span id="today-count">{{ today_tasks | length }}</span></div><div class="label">今天待办</div></div>
+  <div class="stat"><div class="value">{% if today_minutes >= 60 %}{{ '%.1f' % (today_minutes / 60) }}<small>小时</small>{% else %}{{ today_minutes }}<small>分钟</small>{% endif %}</div><div class="label">预计用时</div></div>
+  <div class="stat"><div class="value" data-done-today>{{ done_today }}</div><div class="label">今天已完成</div></div>
+  <div class="stat"><div class="value">{{ projects | length }}</div><div class="label">进行中的作业</div></div>
+</div>
+
+<div class="grid-dash">
+  <div class="stack reveal">
+    <section class="card" aria-labelledby="today-h">
+      <div class="card-head">
+        <h2 id="today-h"><i class="ph ph-sun-horizon"></i>今天</h2>
+      </div>
+      <ul class="task-list" data-task-list data-mode="agenda" data-counter="today-count" data-empty="today-empty">
+        {% for task in today_tasks %}{% with agenda=True %}{% include "_task_row.html" %}{% endwith %}{% endfor %}
+      </ul>
+      <div class="empty" id="today-empty" {% if today_tasks %}hidden{% endif %}>
+        <i class="ph ph-coffee float"></i>
+        <strong>今天没有到期的步骤</strong>
+        {% if projects %}可以提前做一点下面这周的事。{% else %}先创建一个作业，再把它拆成小步骤。{% endif %}
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="week-h">
+      <div class="card-head"><h2 id="week-h"><i class="ph ph-calendar-dots"></i>接下来 6 天</h2></div>
+      {% for day, items in week_tasks | groupby('due_date') %}
+        <div class="agenda-day" data-agenda-day>
+          <h3>{{ day | relday }} <span class="date">{{ day.month }}/{{ day.day }}</span></h3>
+          <ul class="task-list" data-task-list data-mode="agenda">
+            {% for task in items %}{% with agenda=True %}{% include "_task_row.html" %}{% endwith %}{% endfor %}
+          </ul>
+        </div>
+      {% else %}
+        <div class="empty"><i class="ph ph-calendar-check"></i>这周后面还没有安排。到项目里给步骤加上日期，它们就会出现在这里。</div>
+      {% endfor %}
+    </section>
+  </div>
+
+  <section class="card reveal" aria-labelledby="proj-h">
+    <div class="card-head">
+      <h2 id="proj-h">我的作业</h2>
+      <span class="count">{{ projects | length }}</span>
     </div>
-  {% else %}
-    <div class="empty">还没有待完成的作业。<br><a href="{{ url_for('new_project') }}">创建第一个项目</a></div>
-  {% endfor %}
+    {% if projects %}
+      <div class="filters" data-filters="project-list" role="group" aria-label="按状态筛选">
+        <button class="chip active" type="button" data-filter="all" aria-pressed="true">全部</button>
+        {% for key in ['not_started', 'in_progress', 'done'] %}
+          {% set n = projects | selectattr('status', 'equalto', key) | list | length %}
+          <button class="chip" type="button" data-filter="{{ key }}" aria-pressed="false">{{ STATUS_LABELS[key].split('（')[0] }}<span class="n">{{ n }}</span></button>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <div class="project-list" id="project-list">
+      {% for p in projects %}
+        {% set prog = p.progress %}
+        <a class="project-row" href="{{ url_for('project_detail', project_id=p.id) }}" data-status="{{ p.status }}">
+          {{ ring(p) }}
+          <span class="meta">
+            <span class="name">{{ p.name }}</span>
+            <span class="muted"><i class="bullet {{ p.status }}" title="{{ STATUS_LABELS[p.status] }}"></i>
+              {% if p.deadline < now and p.status != 'done' %}<span class="overdue">已逾期</span>{% else %}{{ p | countdown }}{% endif %}
+              · {{ prog[0] }}/{{ prog[1] }} 步</span>
+          </span>
+          <i class="ph ph-caret-right go"></i>
+        </a>
+      {% else %}
+        <div class="empty">
+          <i class="ph ph-notebook float"></i>
+          <strong>还没有待完成的作业</strong>
+          把作业要求贴进来，AI 可以帮你拆成每天能完成的小步骤。
+          <div class="btn-row"><a class="btn" href="{{ url_for('new_project') }}"><i class="ph ph-plus"></i>创建第一个项目</a></div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="empty" data-filter-empty hidden>这个状态下没有作业。</div>
+    {% if projects %}
+      <div class="legend" style="margin-top:14px;">
+        <span><i class="bullet not_started"></i>未开始</span>
+        <span><i class="bullet in_progress"></i>进行中</span>
+        <span><i class="bullet done"></i>已完成（未提交）</span>
+      </div>
+    {% endif %}
+  </section>
 </div>
 {% endblock %}

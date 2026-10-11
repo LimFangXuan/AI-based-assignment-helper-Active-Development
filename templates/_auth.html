@@ -1,0 +1,36 @@
+{# 登录和注册共用的左右分栏布局。需要变量：mode = 'login' | 'register' #}
+<main class="auth">
+  <aside class="auth-side">
+    <h1>把作业拆小，按时交完。</h1>
+    <p>贴进作业要求，AI 帮你拆成每天能完成的步骤；每天打开只看今天该做什么。</p>
+    <ul class="auth-points">
+      <li style="--i:0"><i class="ph ph-list-checks"></i>自动拆解步骤，按截止日期排好日程</li>
+      <li style="--i:1"><i class="ph ph-sun-horizon"></i>“今天 / 本周”视图，打勾就更新进度</li>
+      <li style="--i:2"><i class="ph ph-shield-check"></i>先检查要求里的冲突，再生成可靠的 prompt</li>
+    </ul>
+  </aside>
+  <section class="auth-form">
+    <div class="inner reveal">
+      <h2>{{ '欢迎回来' if mode == 'login' else '创建账号' }}</h2>
+      <p class="muted">{{ '登录后继续你的作业计划。' if mode == 'login' else '只需要用户名和密码，不收集邮箱。' }}</p>
+      <form method="POST">
+        {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="username">{{ '用户名' if mode == 'login' else '用户名（3-80 个字符）' }}</label>
+        <input type="text" id="username" name="username" value="{{ username or '' }}" autocomplete="username" required autofocus>
+        <label for="password">{{ '密码' if mode == 'login' else '密码（至少 6 个字符）' }}</label>
+        <div class="pw-wrap">
+          <input type="password" id="password" name="password" required
+                 autocomplete="{{ 'current-password' if mode == 'login' else 'new-password' }}" {% if mode == 'register' %}minlength="6"{% endif %}>
+          <button class="icon-btn" type="button" data-pw-toggle aria-label="显示密码"><i class="ph ph-eye"></i></button>
+        </div>
+        <p style="margin-top:22px;"><button class="btn block" type="submit">{{ '登录' if mode == 'login' else '注册' }}<i class="ph ph-arrow-right"></i></button></p>
+      </form>
+      {% if mode == 'login' %}
+        <p class="muted">还没有账号？<a href="{{ url_for('register') }}">去注册</a></p>
+      {% else %}
+        <p class="muted">已有账号？<a href="{{ url_for('login') }}">去登录</a></p>
+      {% endif %}
+    </div>
+  </section>
+</main>

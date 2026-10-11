@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ paper.title }} - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
+<a class="back-link" href="{{ url_for('papers', project_id=project.id) }}"><i class="ph ph-arrow-left"></i>返回论文列表</a>
 <h1 style="font-size:1.35rem;">{{ paper.title }}</h1>
 <p class="muted">{{ paper.authors or '作者未知' }}{% if paper.year %} · {{ paper.year }}{% endif %}{% if paper.venue %} · {{ paper.venue }}{% endif %}</p>
 
@@ -35,19 +37,10 @@
 </div>
 
 <div class="card">
-  <div class="header-row"><h2>引用格式（接近 APA）</h2><button class="btn small" type="button" id="copy-cite">复制</button></div>
+  <div class="header-row"><h2>引用格式（接近 APA）</h2><button class="btn small" type="button" data-copy="citation"><i class="ph ph-copy"></i>复制</button></div>
   <div class="citation" id="citation">{{ paper.citation }}</div>
   <p class="muted">根据 OpenAlex 的元数据自动生成，不经过 AI；提交作业前请对照原文核对格式。</p>
 </div>
 
 <p class="muted">来自 {{ paper.search.created_at.strftime('%Y-%m-%d %H:%M') }} 的检索，检索词：{{ paper.search.queries | join('；') }}</p>
-<p><a href="{{ url_for('papers', project_id=project.id) }}">← 返回论文列表</a></p>
-<script>
-  document.getElementById('copy-cite').addEventListener('click', async (e) => {
-    const text = document.getElementById('citation').innerText;
-    try { await navigator.clipboard.writeText(text); } catch (err) {}
-    e.target.textContent = '已复制 ✓';
-    setTimeout(() => { e.target.textContent = '复制'; }, 2000);
-  });
-</script>
 {% endblock %}

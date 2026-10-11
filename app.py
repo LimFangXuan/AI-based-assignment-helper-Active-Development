@@ -2,11 +2,11 @@ import hmac
 import json
 import os
 import secrets
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -73,6 +73,39 @@ class Project(db.Model):
         cascade="all, delete-orphan",
         order_by="PaperSearch.created_at.desc()",
     )
+    tasks = db.relationship(
+        "Task",
+        backref="project",
+        cascade="all, delete-orphan",
+        order_by="(Task.position, Task.id)",
+    )
+
+    @property
+    def progress(self):
+        """(已完成步骤数, 总步骤数, 百分比)。没有步骤时按状态估算，让进度条也有意义。"""
+        total = len(self.tasks)
+        done = sum(1 for t in self.tasks if t.done)
+        if total:
+            return done, total, round(done * 100 / total)
+        return 0, 0, {"done": 100, "submitted": 100, "in_progress": 50}.get(self.status, 0)
+
+    @property
+    def days_left(self):
+        return (self.deadline.date() - date.today()).days
+
+
+class Task(db.Model):
+    """项目里的一个小步骤：可以打勾、有自己的日期。Dashboard 的“今天 / 本周”就是从这里来的。"""
+
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date)
+    minutes = db.Column(db.Integer)  # 预计用时（分钟），可以为空
+    done = db.Column(db.Boolean, nullable=False, default=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+    done_at = db.Column(db.DateTime)
 
 
 class PromptSession(db.Model):
@@ -216,6 +249,38 @@ def parse_deadline(raw):
         return None
 
 
+def parse_date(raw):
+    """返回 (日期或 None, 是否有效)。空字符串表示“没有日期”，是有效的。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return None, True
+    try:
+        return date.fromisoformat(raw), True
+    except ValueError:
+        return None, False
+
+
+def parse_minutes(raw):
+    try:
+        minutes = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return minutes if 5 <= minutes <= 600 else None
+
+
+def wants_json():
+    """页面上的 JS 用 fetch 提交时会带这个请求头；没有 JS 时表单照常提交、整页跳转。"""
+    return request.headers.get("X-Requested-With") == "fetch"
+
+
+def safe_next(default):
+    """只允许跳回本站的相对路径，防止被当成开放重定向。"""
+    target = request.form.get("next", "")
+    if target.startswith("/") and not target.startswith("//") and "\\" not in target:
+        return target
+    return default
+
+
 # ---- CSRF 防护：所有 POST 表单必须带上服务器发的随机令牌 ----
 def get_csrf_token():
     if "_csrf_token" not in session:
@@ -237,7 +302,37 @@ def check_csrf():
 
 @app.context_processor
 def inject_globals():
-    return {"now": datetime.now(), "STATUS_LABELS": STATUS_LABELS}
+    return {"now": datetime.now(), "today": date.today(), "STATUS_LABELS": STATUS_LABELS}
+
+
+WEEKDAYS = "一二三四五六日"
+
+
+@app.template_filter("relday")
+def relday(d):
+    """把日期显示成“今天 / 明天 / 周三 / 10月14日”这种更好读的形式。"""
+    if d is None:
+        return "无日期"
+    diff = (d - date.today()).days
+    if diff == 0:
+        return "今天"
+    if diff == 1:
+        return "明天"
+    if diff == -1:
+        return "昨天"
+    if 1 < diff < 7:
+        return f"周{WEEKDAYS[d.weekday()]}"
+    return f"{d.month}月{d.day}日"
+
+
+@app.template_filter("countdown")
+def countdown(project):
+    days = project.days_left
+    if days < 0:
+        return f"已逾期 {-days} 天"
+    if days == 0:
+        return "今天截止"
+    return f"还剩 {days} 天"
 
 
 # ======================= 账号：注册 / 登录 / 登出 =======================
@@ -307,7 +402,25 @@ def dashboard():
         .order_by(Project.deadline.asc())
         .all()
     )
-    return render_template("dashboard.html", projects=projects)
+    today = date.today()
+    # 今天要做的 = 今天到期 + 已经过期还没做的；本周 = 接下来 6 天
+    open_tasks = (
+        Task.query.join(Project)
+        .filter(Project.user_id == g.user.id, Project.status != "submitted", Task.done.is_(False),
+                Task.due_date.isnot(None), Task.due_date <= today + timedelta(days=6))
+        .order_by(Task.due_date.asc(), Task.position.asc(), Task.id.asc())
+        .all()
+    )
+    today_tasks = [t for t in open_tasks if t.due_date <= today]
+    week_tasks = [t for t in open_tasks if t.due_date > today]
+    done_today = (
+        Task.query.join(Project)
+        .filter(Project.user_id == g.user.id, Task.done.is_(True),
+                Task.done_at >= datetime.combine(today, datetime.min.time()))
+        .count()
+    )
+    return render_template("dashboard.html", projects=projects, today_tasks=today_tasks, week_tasks=week_tasks,
+                           done_today=done_today, today_minutes=sum(t.minutes or 0 for t in today_tasks))
 
 
 @app.route("/projects/new", methods=["GET", "POST"])
@@ -402,6 +515,192 @@ def submit_project(project_id):
     db.session.commit()
     flash(f"「{project.name}」已标记为提交", "success")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/projects/<int:project_id>/delete", methods=["POST"])
+@login_required
+def delete_project(project_id):
+    """真正删除（连同步骤、prompt 记录、论文）。页面上会先弹窗确认。"""
+    project = get_own_project(project_id)
+    name = project.name
+    db.session.delete(project)
+    db.session.commit()
+    flash(f"「{name}」已删除", "success")
+    return redirect(url_for("dashboard"))
+
+
+# ======================= 任务步骤 =======================
+def get_own_task(project, task_id):
+    task = db.session.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        abort(404)
+    return task
+
+
+def sync_status(project):
+    """根据打勾情况自动更新项目状态：全部完成 → 已完成；做了一部分 → 进行中。已提交的不动。"""
+    if project.status == "submitted" or not project.tasks:
+        return
+    done, total, _ = project.progress
+    if done == total:
+        project.status = "done"
+    elif done:
+        project.status = "in_progress"
+    elif project.status == "done":  # 加了新步骤或取消打勾，不再是“全部完成”
+        project.status = "in_progress"
+
+
+def task_response(project, message=None, task=None):
+    """fetch 请求返回 JSON（页面局部刷新）；普通表单提交则跳转回原页面。"""
+    if wants_json():
+        done, total, pct = project.progress
+        data = {"ok": True, "message": message, "status": project.status,
+                "status_label": STATUS_LABELS[project.status],
+                "progress": {"done": done, "total": total, "pct": pct}}
+        if task is not None:
+            data["html"] = render_template("_task_row.html", project=project, task=task)
+        return jsonify(data)
+    if message:
+        flash(message, "success")
+    return redirect(safe_next(url_for("project_detail", project_id=project.id) + "#tasks"))
+
+
+def task_error(project, message):
+    if wants_json():
+        return jsonify({"ok": False, "error": message}), 400
+    flash(message, "error")
+    return redirect(safe_next(url_for("project_detail", project_id=project.id) + "#tasks"))
+
+
+def read_task_form(form):
+    """返回 (字段, 错误信息)。"""
+    title = form.get("title", "").strip()
+    if not 1 <= len(title) <= 200:
+        return None, "步骤名称需要在 1 到 200 个字符之间"
+    due, ok = parse_date(form.get("due_date"))
+    if not ok:
+        return None, "日期格式不正确"
+    return {"title": title, "due_date": due, "minutes": parse_minutes(form.get("minutes"))}, None
+
+
+@app.route("/projects/<int:project_id>/tasks", methods=["POST"])
+@login_required
+def task_add(project_id):
+    project = get_own_project(project_id)
+    fields, error = read_task_form(request.form)
+    if error:
+        return task_error(project, error)
+    position = max((t.position for t in project.tasks), default=-1) + 1
+    task = Task(project_id=project.id, position=position, **fields)
+    db.session.add(task)
+    db.session.flush()
+    db.session.refresh(project)  # 让 project.tasks 包含刚加的步骤
+    sync_status(project)
+    db.session.commit()
+    return task_response(project, task=task)
+
+
+@app.route("/projects/<int:project_id>/tasks/<int:task_id>/toggle", methods=["POST"])
+@login_required
+def task_toggle(project_id, task_id):
+    project = get_own_project(project_id)
+    task = get_own_task(project, task_id)
+    task.done = not task.done
+    task.done_at = datetime.now() if task.done else None
+    sync_status(project)
+    db.session.commit()
+    done, total, _ = project.progress
+    message = "全部步骤完成，检查一遍就可以提交了" if task.done and done == total else None
+    return task_response(project, message)
+
+
+@app.route("/projects/<int:project_id>/tasks/<int:task_id>/update", methods=["POST"])
+@login_required
+def task_update(project_id, task_id):
+    project = get_own_project(project_id)
+    task = get_own_task(project, task_id)
+    fields, error = read_task_form(request.form)
+    if error:
+        return task_error(project, error)
+    task.title, task.due_date, task.minutes = fields["title"], fields["due_date"], fields["minutes"]
+    db.session.commit()
+    return task_response(project, task=task)
+
+
+@app.route("/projects/<int:project_id>/tasks/<int:task_id>/delete", methods=["POST"])
+@login_required
+def task_delete(project_id, task_id):
+    project = get_own_project(project_id)
+    task = get_own_task(project, task_id)
+    db.session.delete(task)
+    db.session.flush()
+    db.session.refresh(project)
+    sync_status(project)
+    db.session.commit()
+    return task_response(project)
+
+
+@app.route("/projects/<int:project_id>/tasks/reorder", methods=["POST"])
+@login_required
+def task_reorder(project_id):
+    """拖拽排序：ids 是按新顺序排列、逗号分隔的步骤 ID。不属于这个项目的 ID 一律忽略。"""
+    project = get_own_project(project_id)
+    by_id = {t.id: t for t in project.tasks}
+    order = []
+    for raw in request.form.get("ids", "").split(","):
+        raw = raw.strip()
+        if raw.isdigit() and int(raw) in by_id and int(raw) not in order:
+            order.append(int(raw))
+    order += [t.id for t in project.tasks if t.id not in order]  # 漏掉的步骤保持在后面
+    for position, task_id in enumerate(order):
+        by_id[task_id].position = position
+    db.session.commit()
+    return task_response(project)
+
+
+@app.route("/projects/<int:project_id>/plan", methods=["POST"])
+@login_required
+def plan_new(project_id):
+    """AI 根据描述拆出步骤草稿。草稿不存库：学生改完点“保存”才写入。"""
+    project = get_own_project(project_id)
+    if not project.description:
+        flash("请先在项目里补充描述，AI 才知道怎么拆解", "error")
+        return redirect(url_for("project_detail", project_id=project.id))
+    try:
+        steps = prompt_builder.generate_plan(project, date.today())
+    except AIServiceError as e:
+        flash(e.user_message, "error")
+        return redirect(url_for("project_detail", project_id=project.id))
+    return render_template("plan_draft.html", project=project, steps=steps)
+
+
+@app.route("/projects/<int:project_id>/plan/save", methods=["POST"])
+@login_required
+def plan_save(project_id):
+    project = get_own_project(project_id)
+    titles = request.form.getlist("title")
+    dues = request.form.getlist("due_date")
+    minutes = request.form.getlist("minutes")
+    position = max((t.position for t in project.tasks), default=-1) + 1
+    added = 0
+    for i, title in enumerate(titles[:prompt_builder.MAX_PLAN_STEPS * 2]):
+        title = title.strip()[:200]
+        if not title:
+            continue  # 学生清空了内容的行直接跳过
+        due, ok = parse_date(dues[i] if i < len(dues) else "")
+        db.session.add(Task(project_id=project.id, title=title, due_date=due if ok else None,
+                            minutes=parse_minutes(minutes[i] if i < len(minutes) else None),
+                            position=position + added))
+        added += 1
+    if not added:
+        flash("没有可以保存的步骤", "error")
+        return redirect(url_for("project_detail", project_id=project.id))
+    db.session.flush()
+    db.session.refresh(project)
+    sync_status(project)
+    db.session.commit()
+    flash(f"已加入 {added} 个步骤", "success")
+    return redirect(url_for("project_detail", project_id=project.id) + "#tasks")
 
 
 @app.route("/submitted")

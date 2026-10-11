@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}检查 AI 拆解的步骤 - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
+{% block content %}
+<a class="back-link" href="{{ url_for('project_detail', project_id=project.id) }}"><i class="ph ph-arrow-left"></i>放弃并返回项目</a>
+<div class="page-head reveal">
+  <div>
+    <h1>检查 AI 拆解的步骤</h1>
+    <p class="sub">{{ project.name }} · 截止 {{ project.deadline.strftime('%m-%d %H:%M') }}。这只是草稿：改名称、调日期、删掉不需要的，再保存。</p>
+  </div>
+</div>
+
+<form method="POST" action="{{ url_for('plan_save', project_id=project.id) }}" class="card reveal">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div data-draft>
+    {% for st in steps %}
+      <div class="draft-row entering" style="animation-delay: {{ loop.index0 * 55 }}ms">
+        <span class="idx">{{ loop.index }}</span>
+        <input type="text" name="title" value="{{ st.title }}" maxlength="200" aria-label="步骤 {{ loop.index }}">
+        <input class="d" type="date" name="due_date" value="{{ st.due_date.isoformat() if st.due_date else '' }}" aria-label="日期">
+        <input class="m" type="number" name="minutes" min="5" max="600" step="5" value="{{ st.minutes or '' }}" placeholder="分钟" aria-label="预计分钟">
+        <button class="icon-btn" type="button" data-remove aria-label="删除这一步"><i class="ph ph-x"></i></button>
+      </div>
+    {% endfor %}
+  </div>
+  <p class="muted" style="margin-top:10px;">日期已经限制在今天和截止日期之间。清空名称的行不会被保存。</p>
+  <div class="btn-row" style="justify-content:space-between;margin-top:6px;">
+    <button class="btn ghost" type="button" data-add-row><i class="ph ph-plus"></i>加一步</button>
+    <div class="btn-row">
+      <a class="btn secondary" href="{{ url_for('project_detail', project_id=project.id) }}">放弃</a>
+      <button class="btn" type="submit"><i class="ph ph-check"></i>保存这些步骤</button>
+    </div>
+  </div>
+</form>
+<template>
+  <div class="draft-row">
+    <span class="idx"></span>
+    <input type="text" name="title" maxlength="200" aria-label="新步骤">
+    <input class="d" type="date" name="due_date" aria-label="日期">
+    <input class="m" type="number" name="minutes" min="5" max="600" step="5" placeholder="分钟" aria-label="预计分钟">
+    <button class="icon-btn" type="button" data-remove aria-label="删除这一步"><i class="ph ph-x"></i></button>
+  </div>
+</template>
+{% endblock %}

@@ -3,7 +3,7 @@
 <div class="stepper">
   {% for label in labels %}
     <div class="step {% if loop.index < current %}done{% elif loop.index == current %}current{% endif %}">
-      {{ '✓ ' if loop.index < current else '' }}{{ label }}
+      {% if loop.index < current %}<i class="ph ph-check"></i> {% endif %}{{ label }}
     </div>
   {% endfor %}
 </div>

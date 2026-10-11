@@ -7,9 +7,12 @@ I built it to learn how to integrate an LLM API into a real backend: authenticat
 ## Features
 
 - **Accounts** – register / login / logout, passwords stored as salted hashes, session-based auth.
-- **Dashboard** – each assignment has a colored status dot: red = not started, yellow = in progress, cyan = done (not yet submitted). Overdue items are highlighted.
+- **Today / this week** – the dashboard opens on what is due today (plus anything overdue) and the next six days, grouped by day, with the estimated time for today. Ticking a step there updates everything in place.
+- **Steps** – every assignment can be split into small steps with their own date and estimated minutes. Steps can be added (press Enter to keep adding), edited inline, ticked, deleted and reordered by dragging. Progress rings and the project status follow automatically: the first tick moves a project to *in progress*, the last one to *done*.
+- **AI breakdown** – the AI turns the assignment description into 4–10 concrete steps spread between today and the deadline. The result is only a draft: the student edits, removes or adds rows before anything is saved. Dates and durations are validated in code (clamped to today…deadline, nonsense values dropped).
+- **Dashboard** – each assignment has a colored status dot and progress ring: red = not started, yellow = in progress, cyan = done (not yet submitted). Overdue items are highlighted; filter chips narrow the list by status.
 - **Create project** – name, deadline (date + time picker), free-text description.
-- **Submit** – the "Submitted" button hides the project from the dashboard (soft delete: data is kept and listed on the *Submitted* page).
+- **Submit** – the "Submitted" button hides the project from the dashboard (soft delete: data is kept and listed on the *Submitted* page, and can be moved back to *in progress*). **Delete** permanently removes a project after a confirmation dialog.
 - **Edit project** – update the description, e.g. to record a lecturer's written permission, then regenerate.
 - **Paper recommendations** (report, literature review, software and data/ML projects) – a fixed-flow RAG pipeline (retrieval-augmented generation: retrieve real sources first, then let the AI work only with what was retrieved). The AI turns the confirmed summary into English search terms, OpenAlex returns real papers, the AI may only pick from those candidates and explain why, and code checks every picked ID against the candidate list. The student chooses how many papers (1–10) and whether to keep open-access papers only. Results are stored and shown like a search-results list; each paper has a detail page with metadata, the AI's reason and a citation generated from metadata (not by the AI).
 - **Prompt generator** – before asking anything, the AI **diagnoses** the project (feasibility, guideline fit, scope, conflicts). It then asks 3–5 clarifying questions (multiple choice, an "I don't know" option, and a free-text box), and produces a summary that separates **confirmed facts, recommendations and assumptions**, plus a ready-to-copy prompt built on a six-step framework. **If a conflict is still unresolved, no prompt is generated.**
@@ -42,7 +45,8 @@ The safety part of the prompt is **not** left to the model: confirmed facts, rec
 | `openalex_client.py` | The only module that talks to OpenAlex: search, field normalisation, abstract reconstruction from the inverted index |
 | `privacy.py` | Masks e-mail addresses and phone numbers before any text is sent to the AI or placed in a prompt |
 | `skills/prompt_generator/` | The method as plain files: decision rules, prompt-design rules, question banks and best practices per project type (assignments, interview preparation, skill learning) |
-| `templates/`, `static/` | Jinja2 pages and CSS |
+| `templates/`, `static/` | Jinja2 pages, the CSS design system (light + dark tokens) and `app.js` (progressive enhancement: partial updates, tabs, dialogs, drag-and-drop) |
+| `seed_demo.py` | Creates a local demo account with sample assignments and steps |
 | `test_app.py` | Automated tests (AI is mocked; no API quota used) |
 
 ## Design decisions
@@ -59,6 +63,9 @@ The safety part of the prompt is **not** left to the model: confirmed facts, rec
 - **Prompt-injection hygiene.** User-provided text is wrapped in delimiters and declared as data, not instructions.
 - **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project (other users get 404), a login-required decorator, identical error message for unknown user vs. wrong password.
 - **Soft delete.** Submitting changes `status` instead of deleting rows, so a misclick is recoverable and history is preserved.
+- **Works without JavaScript.** Every action is a normal form POST; `app.js` only upgrades it to an in-place update (requests carry `X-Requested-With: fetch` and get JSON back). The `next` redirect target is restricted to same-site paths.
+- **Motion has a job.** Animations mark a state change (tick, progress, new row, dialog, AI waiting) and are switched off under `prefers-reduced-motion`.
+- **Starts the same way everywhere.** Tables are created when `app` is imported, so `python app.py`, `flask run` and a WSGI server all work on a fresh database. Debug mode is off unless `FLASK_DEBUG=1`.
 - **Schema upgrades.** `db.create_all()` does not add columns to existing tables, so `ensure_schema()` adds missing ones at startup; existing users and data are kept.
 
 ## Setup
@@ -69,7 +76,10 @@ venv\Scripts\activate          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env           # then fill in SECRET_KEY and GEMINI_API_KEY
 python app.py                  # http://127.0.0.1:5000
+python seed_demo.py            # optional: local demo account with sample data
 ```
+
+Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. Never enable it on a public server: the Werkzeug debugger can run code.
 
 Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Get a Gemini key at https://aistudio.google.com. Free-tier inputs may be used by Google to improve its models, so don't paste sensitive material.
 
@@ -79,13 +89,15 @@ Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex
 python test_app.py
 ```
 
-193 checks covering auth, CSRF, access control between users, project/status/edit flow, skill file loading, the full diagnose → ask → summarise → confirm → prompt flow with a fake AI, per-project customisation (interview vs. software get different roles, steps and references), the revise loop, fallback when the AI's design is invalid, conflict blocking and evidence filtering, simulated 503/429/403/network failures, primary-to-fallback model switching, request timeouts (including a real SDK call against a deliberately slow local server), malformed AI output, the paper pipeline (fake network via httpx MockTransport: real parsing code, no real requests; invented IDs dropped, injected instructions kept inside the data block, timeouts/429/500 store nothing, HTML in titles escaped, javascript: links removed, per-user access control), e-mail/phone masking, and upgrading an existing database.
+242 checks covering auth, CSRF, steps (add / edit / tick / reorder / delete, automatic status, today and this-week views, open-redirect protection, per-user isolation), the AI breakdown (date clamping, invalid output, draft is not stored until saved), project deletion, starting on a fresh database without `python app.py`, access control between users, project/status/edit flow, skill file loading, the full diagnose → ask → summarise → confirm → prompt flow with a fake AI, per-project customisation (interview vs. software get different roles, steps and references), the revise loop, fallback when the AI's design is invalid, conflict blocking and evidence filtering, simulated 503/429/403/network failures, primary-to-fallback model switching, request timeouts (including a real SDK call against a deliberately slow local server), malformed AI output, the paper pipeline (fake network via httpx MockTransport: real parsing code, no real requests; invented IDs dropped, injected instructions kept inside the data block, timeouts/429/500 store nothing, HTML in titles escaped, javascript: links removed, per-user access control), e-mail/phone masking, and upgrading an existing database.
 
 ## Known limitations / roadmap
 
 - Description is text only; file upload / drag & drop of guidelines is not implemented yet.
 - One round of clarifying questions (the confirm page does allow written corrections and regeneration).
-- AI calls are synchronous: starting a prompt makes two calls (diagnosis + questions) and answering makes one, so the page waits several seconds. A background job queue would be the next step.
+- AI calls are synchronous: starting a prompt makes two calls (diagnosis + questions) and answering makes one, so the page waits several seconds (a waiting dialog explains what is happening). A background job queue would be the next step.
+- No reminders yet (e-mail / push before a step is due).
+- Drag-to-reorder uses HTML5 drag and drop, which does not work on touch screens.
 - Not deployed; development server only.
 - Planned: literature search module backed by a real scholarly API (so references are never invented), and an example-reference module.
 

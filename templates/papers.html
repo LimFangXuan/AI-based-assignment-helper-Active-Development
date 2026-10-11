@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}论文推荐 - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
+<a class="back-link" href="{{ url_for('project_detail', project_id=project.id) }}#ai"><i class="ph ph-arrow-left"></i>返回项目</a>
 <h1>论文推荐</h1>
 <p class="muted">项目：{{ project.name }}</p>
 
@@ -10,12 +12,13 @@
   <div class="card">
     <p class="muted">流程：AI 根据你已确认的摘要生成英文检索词 → 在 OpenAlex 学术数据库检索真实论文 →
       AI 只能从检索结果里挑选并说明理由 → 代码核对每一篇都来自检索结果，对不上的直接丢弃。</p>
-    <form method="POST" action="{{ url_for('papers_new', project_id=project.id) }}" class="inline-form">
+    <form method="POST" action="{{ url_for('papers_new', project_id=project.id) }}" class="inline-form"
+          data-ai="正在生成英文检索词|正在 OpenAlex 检索真实论文|正在从候选中挑选并核对来源">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <label>需要几篇
         <input type="number" name="count" min="{{ min_papers }}" max="{{ max_papers }}" value="5" required></label>
       <label><input type="checkbox" name="oa_only" value="1" checked> 只要开放获取（可以免费读全文）</label>
-      <button class="btn" type="submit">检索推荐论文</button>
+      <button class="btn" type="submit"><i class="ph ph-magnifying-glass"></i>检索推荐论文</button>
       <span class="muted">（需要十几秒）</span>
     </form>
   </div>
@@ -37,5 +40,4 @@
     </div>
   {% endfor %}
 {% endif %}
-<p><a href="{{ url_for('project_detail', project_id=project.id) }}">← 返回项目</a></p>
 {% endblock %}

@@ -16,7 +16,7 @@
       <li>{{ r.text }}<br><span class="muted">理由：{{ r.reason or '无' }}</span></li>
     {% else %}<li class="muted">没有</li>{% endfor %}
   </ul>
-  <strong>⚠ [假设] AI 推断的内容，请检查是否正确</strong>
+  <strong><i class="ph ph-warning"></i> [假设] AI 推断的内容，请检查是否正确</strong>
   <ul class="plain">
     {% for a in s.assumptions %}
       <li>{{ a.text }}<br><span class="muted">依据：{{ a.reason or '无' }}；若错误：{{ a.if_wrong or '未说明' }}</span></li>

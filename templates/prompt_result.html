@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}你的 Prompt - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
+<a class="back-link" href="{{ url_for('project_detail', project_id=project.id) }}#ai"><i class="ph ph-arrow-left"></i>返回项目</a>
 {% set current = 3 %}{% include "_stepper.html" %}
 <h1>你的 Prompt 已生成</h1>
 <p class="muted">项目：{{ project.name }}</p>
@@ -8,7 +10,7 @@
 <div class="card">
   <div class="header-row">
     <h2>可以直接复制的 Prompt</h2>
-    <button class="btn" type="button" id="copy-btn">一键复制</button>
+    <button class="btn" type="button" data-copy="final-prompt"><i class="ph ph-copy"></i>一键复制</button>
   </div>
   <textarea class="prompt" id="final-prompt" readonly>{{ ps.final_prompt }}</textarea>
   <p class="muted">粘贴给任何聊天 AI 之前，先检查“假设”部分，不对的地方直接在 prompt 里改掉。</p>
@@ -17,24 +19,11 @@
 {% set s = ps.summary %}
 {% include "_summary.html" %}
 
-<form method="POST" action="{{ url_for('prompt_new', project_id=project.id) }}" style="display:inline;">
+<form method="POST" action="{{ url_for('prompt_new', project_id=project.id) }}" class="btn-row"
+      data-ai="正在诊断项目是否可行|正在准备几个关键问题">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-  <button class="btn secondary" type="submit">重新生成一份</button>
+  <button class="btn secondary" type="submit"><i class="ph ph-arrows-clockwise"></i>重新生成一份</button>
+  <a class="btn ghost" href="{{ url_for('project_detail', project_id=project.id) }}#ai">返回项目</a>
 </form>
-<a class="btn secondary" href="{{ url_for('project_detail', project_id=project.id) }}">返回项目</a>
 
-<script>
-  const btn = document.getElementById('copy-btn');
-  const box = document.getElementById('final-prompt');
-  btn.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(box.value);
-    } catch (e) {
-      box.select();
-      document.execCommand('copy');  // 旧浏览器的备用方案
-    }
-    btn.textContent = '已复制 ✓';
-    setTimeout(() => { btn.textContent = '一键复制'; }, 2000);
-  });
-</script>
 {% endblock %}

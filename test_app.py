@@ -29,7 +29,7 @@ from google.genai import errors  # noqa: E402
 import ai_client  # noqa: E402
 import openalex_client  # noqa: E402
 import prompt_builder  # noqa: E402
-from app import Paper, PaperSearch, PromptSession, Project, app, db, ensure_schema  # noqa: E402
+from app import Paper, PaperSearch, PromptSession, Project, Task, app, db, ensure_schema  # noqa: E402
 
 # app.py / ai_client.py 导入时会读取 .env，这里在导入之后删掉真实 key，保证绝不发出真实请求
 os.environ.pop("GEMINI_API_KEY", None)
@@ -140,6 +140,9 @@ def fake_generate(prompt, json_mode=False):
         return json.dumps(ai_state["summary"])
     if prompt.startswith("[TASK:PAPER_QUERIES]"):
         return json.dumps({"queries": ["traffic sign recognition", "image feature extraction"]})
+    if prompt.startswith("[TASK:PLAN]"):
+        plan = ai_state.get("plan")
+        return plan if isinstance(plan, str) else json.dumps(plan)
     if prompt.startswith("[TASK:PAPER_SELECT]"):
         return ai_state["select"] if isinstance(ai_state.get("select"), str) else json.dumps(ai_state["select"])
     raise AssertionError("未知任务")
@@ -767,6 +770,161 @@ check("不存在的项目 -> 404", c.get("/projects/99999").status_code == 404)
 post(c, "/logout")
 check("登出后访问首页 -> 跳转登录", c.get("/").status_code == 302)
 check("GET 登出地址不会登出（405）", c.get("/logout").status_code == 405)
+
+import subprocess  # noqa: E402
+
+# ================= 9b. 任务步骤、今日视图、AI 拆解、删除项目 =================
+from datetime import date, datetime, timedelta  # noqa: E402
+
+ai_client._generate = fake_generate
+TODAY = date.today()
+FETCH = {"X-Requested-With": "fetch"}
+cd = app.test_client()
+register(cd, "dave")
+deadline = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%dT%H:%M")
+r = post(cd, "/projects/new", {"name": "统计作业", "deadline": deadline, "description": "写一份 1500 字的回归分析报告"})
+tpid = int(r.location.rsplit("/", 1)[1])
+html = cd.get(f"/projects/{tpid}").get_data(as_text=True)
+check("新项目：步骤为空时有提示和 AI 拆解入口", "还没有步骤" in html and "AI 帮我拆解" in html)
+
+r = post(cd, f"/projects/{tpid}/tasks", {"title": "读题并列出要求", "due_date": TODAY.isoformat(), "minutes": "30"})
+check("没有 JS 时添加步骤：跳回项目页的步骤标签", r.status_code == 302 and r.location.endswith(f"/projects/{tpid}#tasks"))
+check("新步骤显示在项目页", "读题并列出要求" in cd.get(f"/projects/{tpid}").get_data(as_text=True))
+r = post(cd, f"/projects/{tpid}/tasks", {"title": "   "})
+check("空步骤名称被拒绝", "1 到 200" in cd.get(r.location).get_data(as_text=True))
+r = post(cd, f"/projects/{tpid}/tasks", {"title": "x", "due_date": "2026-13-45"}, headers=FETCH)
+check("无效日期：fetch 请求返回 400 和错误信息", r.status_code == 400 and r.get_json()["error"] == "日期格式不正确")
+
+r = post(cd, f"/projects/{tpid}/tasks", {"title": "跑回归模型", "due_date": (TODAY + timedelta(days=3)).isoformat()},
+         headers=FETCH)
+data = r.get_json()
+check("fetch 添加步骤：返回 JSON、渲染好的一行和进度", data["ok"] and "跑回归模型" in data["html"]
+      and data["progress"] == {"done": 0, "total": 2, "pct": 0})
+post(cd, f"/projects/{tpid}/tasks", {"title": "整理参考资料（没有日期）"})
+with app.app_context():
+    tasks = Task.query.filter_by(project_id=tpid).order_by(Task.position).all()
+    t_ids = [t.id for t in tasks]
+    check("步骤按添加顺序排好位置，预计用时保存下来", [t.position for t in tasks] == [0, 1, 2] and tasks[0].minutes == 30)
+    check("没有日期的步骤允许保存", tasks[2].due_date is None)
+
+html = cd.get("/").get_data(as_text=True)
+today_part = html.split('id="today-h"')[1].split('id="week-h"')[0]
+week_part = html.split('id="week-h"')[1].split('id="proj-h"')[0]
+check("Dashboard“今天”显示今天到期的步骤和所属项目", "读题并列出要求" in today_part and "统计作业" in today_part)
+check("Dashboard“接下来 6 天”显示 3 天后的步骤", "跑回归模型" in week_part and "跑回归模型" not in today_part)
+check("没有日期的步骤不出现在日程里", "整理参考资料" not in html)
+check("今天的预计用时汇总", "30<small>分钟</small>" in html)
+
+r = post(cd, f"/projects/{tpid}/tasks/{t_ids[0]}/toggle", {}, headers=FETCH)
+data = r.get_json()
+check("打勾：进度变成 1/3，项目自动变成“进行中”", data["progress"]["done"] == 1 and data["status"] == "in_progress")
+check("打勾后从“今天”消失，计入今天已完成", "读题并列出要求" not in cd.get("/").get_data(as_text=True).split('id="week-h"')[0])
+post(cd, f"/projects/{tpid}/tasks/{t_ids[1]}/toggle", {}, headers=FETCH)
+data = post(cd, f"/projects/{tpid}/tasks/{t_ids[2]}/toggle", {}, headers=FETCH).get_json()
+check("全部打勾：项目自动变成“已完成”并给出提示", data["status"] == "done" and "全部步骤完成" in data["message"]
+      and data["progress"]["pct"] == 100)
+data = post(cd, f"/projects/{tpid}/tasks/{t_ids[2]}/toggle", {}, headers=FETCH).get_json()
+check("取消一个勾：退回“进行中”", data["status"] == "in_progress")
+with app.app_context():
+    check("取消打勾时清掉完成时间", db.session.get(Task, t_ids[2]).done_at is None)
+
+r = post(cd, f"/projects/{tpid}/tasks/{t_ids[1]}/toggle", {"next": "/"})
+check("Dashboard 上打勾（没有 JS）跳回 Dashboard", r.status_code == 302 and r.location == "/")
+r = post(cd, f"/projects/{tpid}/tasks/{t_ids[1]}/toggle", {"next": "//evil.example.com/"})
+check("next 指向外站时不跳过去（防开放重定向）", "evil" not in r.location)
+
+r = post(cd, f"/projects/{tpid}/tasks/{t_ids[0]}/update",
+         {"title": "读题并标出评分点", "due_date": "", "minutes": "45"}, headers=FETCH)
+check("编辑步骤：返回新的一行", "读题并标出评分点" in r.get_json()["html"])
+with app.app_context():
+    t = db.session.get(Task, t_ids[0])
+    check("编辑后名称、日期、用时都更新", t.title == "读题并标出评分点" and t.due_date is None and t.minutes == 45)
+check("编辑时同样校验名称", post(cd, f"/projects/{tpid}/tasks/{t_ids[0]}/update", {"title": ""}, headers=FETCH).status_code == 400)
+
+post(cd, f"/projects/{tpid}/tasks/reorder", {"ids": f"{t_ids[2]},999999,{t_ids[0]}"}, headers=FETCH)
+with app.app_context():
+    order = [t.id for t in db.session.get(Project, tpid).tasks]
+check("拖拽排序：按新顺序保存，陌生 ID 被忽略，漏掉的放到最后", order == [t_ids[2], t_ids[0], t_ids[1]])
+
+# 权限：别人的项目、以及把 A 项目的步骤挂到 B 项目的 URL 下
+r = post(cd, "/projects/new", {"name": "另一个作业", "deadline": deadline, "description": ""})
+other_pid = int(r.location.rsplit("/", 1)[1])
+check("步骤不属于 URL 里的项目 -> 404", post(cd, f"/projects/{other_pid}/tasks/{t_ids[0]}/toggle").status_code == 404)
+ce = app.test_client()
+register(ce, "erin")
+check("别人不能打勾", post(ce, f"/projects/{tpid}/tasks/{t_ids[0]}/toggle").status_code == 404)
+check("别人不能加步骤", post(ce, f"/projects/{tpid}/tasks", {"title": "x"}).status_code == 404)
+check("别人不能编辑步骤", post(ce, f"/projects/{tpid}/tasks/{t_ids[0]}/update", {"title": "x"}).status_code == 404)
+check("别人不能删步骤", post(ce, f"/projects/{tpid}/tasks/{t_ids[0]}/delete").status_code == 404)
+check("别人不能排序", post(ce, f"/projects/{tpid}/tasks/reorder", {"ids": ""}).status_code == 404)
+check("别人不能让 AI 拆解", post(ce, f"/projects/{tpid}/plan").status_code == 404)
+check("别人不能删除项目", post(ce, f"/projects/{tpid}/delete").status_code == 404)
+check("步骤接口同样需要 CSRF", cd.post(f"/projects/{tpid}/tasks/{t_ids[0]}/toggle").status_code == 400)
+
+data = post(cd, f"/projects/{tpid}/tasks/{t_ids[1]}/delete", {}, headers=FETCH).get_json()
+check("删除步骤：进度跟着更新", data["ok"] and data["progress"]["total"] == 2)
+
+# AI 拆解：日期越界、格式错误都由代码兜底
+ai_state["plan"] = {"steps": [
+    {"title": "确定研究问题", "due_date": (TODAY - timedelta(days=5)).isoformat(), "minutes": 40},
+    {"title": "收集数据", "due_date": (TODAY + timedelta(days=4)).isoformat(), "minutes": 9999},
+    {"title": "写结论", "due_date": (TODAY + timedelta(days=60)).isoformat(), "minutes": "abc"},
+    {"title": "", "due_date": TODAY.isoformat()},
+    {"title": "检查并提交", "due_date": "不是日期"}]}
+n_calls = len(ai_state["calls"])
+html = post(cd, f"/projects/{tpid}/plan").get_data(as_text=True)
+check("AI 拆解：显示可编辑的草稿", "检查 AI 拆解的步骤" in html and "确定研究问题" in html and "检查并提交" in html)
+check("AI 拆解的请求带上今天和截止日期", TODAY.isoformat() in ai_state["calls"][n_calls]
+      and "写一份 1500 字的回归分析报告" in ai_state["calls"][n_calls])
+plan_deadline = (TODAY + timedelta(days=10))
+steps = prompt_builder.parse_plan(ai_state["plan"], TODAY, plan_deadline)
+check("AI 给的日期被限制在今天到截止日之间", steps[0]["due_date"] == TODAY and steps[2]["due_date"] == plan_deadline)
+check("无效日期变成空、不合理的用时被丢弃、空标题被跳过",
+      steps[3]["due_date"] is None and steps[1]["minutes"] is None and steps[2]["minutes"] is None and len(steps) == 4)
+check("截止日已过：不安排日期", all(s["due_date"] is None for s in
+      prompt_builder.parse_plan(ai_state["plan"], TODAY, TODAY - timedelta(days=1))))
+with app.app_context():
+    check("草稿阶段不写数据库", Task.query.filter_by(project_id=tpid).count() == 2)
+r = post(cd, f"/projects/{tpid}/plan/save", {
+    "title": ["确定研究问题", "", "写结论"], "due_date": [TODAY.isoformat(), "", "bad"], "minutes": ["40", "", "20"]})
+with app.app_context():
+    saved = db.session.get(Project, tpid).tasks
+    check("保存草稿：跳过清空的行，接在已有步骤后面", [t.title for t in saved][-2:] == ["确定研究问题", "写结论"]
+          and saved[-1].position > saved[0].position and saved[-1].due_date is None)
+ai_state["plan"] = {"steps": [{"title": "只有一步"}]}
+n_tasks = len(saved)
+r = post(cd, f"/projects/{tpid}/plan")
+check("AI 只给出一步：友好提示，不写数据库", "格式不正确" in cd.get(r.location).get_data(as_text=True))
+ai_state["plan"] = "不是 JSON"
+r = post(cd, f"/projects/{tpid}/plan")
+check("AI 返回乱码：友好提示", r.status_code == 302 and "flash error" in cd.get(r.location).get_data(as_text=True))
+r = post(cd, f"/projects/{other_pid}/plan")
+check("没有描述时不调用 AI 拆解", "请先在项目里补充描述" in cd.get(r.location).get_data(as_text=True))
+check("没有内容的草稿不能保存", "没有可以保存的步骤" in cd.get(
+    post(cd, f"/projects/{tpid}/plan/save", {"title": ["  "]}).location).get_data(as_text=True))
+
+post(cd, f"/projects/{tpid}/tasks", {"title": "今天要交的检查", "due_date": TODAY.isoformat()})
+post(cd, f"/projects/{tpid}/submit")
+check("已提交项目的步骤不再出现在今天视图", "今天要交的检查" not in cd.get("/").get_data(as_text=True))
+post(cd, f"/projects/{tpid}/status", {"status": "in_progress"})
+check("已提交的项目可以改回进行中，重新出现在 Dashboard", f'href="/projects/{tpid}"' in cd.get("/").get_data(as_text=True))
+
+r = post(cd, f"/projects/{tpid}/delete")
+with app.app_context():
+    check("删除项目：连同步骤一起删除", db.session.get(Project, tpid) is None and Task.query.filter_by(project_id=tpid).count() == 0)
+check("删除后访问 -> 404", cd.get(f"/projects/{tpid}").status_code == 404)
+
+# 用 flask run / gunicorn 启动时不会经过 __main__，导入 app 时就必须建好表
+fresh_db = Path(TMP, "fresh.db")
+script = ("from app import app\nc = app.test_client()\nc.get('/login')\n"
+          "with c.session_transaction() as s: t = s['_csrf_token']\n"
+          "r = c.post('/register', data={'_csrf_token': t, 'username': 'zoe', 'password': 'secret1'})\n"
+          "print(r.status_code)")
+env = dict(os.environ, DATABASE_URL="sqlite:///" + fresh_db.as_posix(), SECRET_KEY="x")
+env.pop("GEMINI_API_KEY", None)
+result = subprocess.run([sys.executable, "-c", script], cwd=str(Path(__file__).resolve().parent),
+                        env=env, capture_output=True, text=True)
+check("全新数据库：不经过 python app.py 也能直接注册", result.stdout.strip().endswith("302"), result.stderr[-300:])
 
 # ================= 10. 旧数据库升级（v1 -> v1.1）：真正调用 ensure_schema =================
 import subprocess  # noqa: E402

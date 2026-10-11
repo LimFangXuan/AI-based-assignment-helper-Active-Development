@@ -1,16 +1,28 @@
 {% extends "base.html" %}
+{% from "_macros.html" import ring %}
 {% block title %}已提交 - 作业效率助手{% endblock %}
+{% block container_class %}narrow{% endblock %}
 {% block content %}
-<h1>已提交的作业</h1>
-<div class="card">
-  {% for p in projects %}
-    <div class="project-row">
-      <i class="bullet submitted"></i>
-      <a class="name" href="{{ url_for('project_detail', project_id=p.id) }}">{{ p.name }}</a>
-      <span class="muted">截止 {{ p.deadline.strftime('%Y-%m-%d %H:%M') }}</span>
-    </div>
-  {% else %}
-    <div class="empty">还没有已提交的作业。</div>
-  {% endfor %}
+<div class="page-head reveal">
+  <div>
+    <h1>已提交的作业</h1>
+    <p class="sub">记录都还在。点进去可以查看步骤和 prompt，也可以改回进行中。</p>
+  </div>
+</div>
+<div class="card reveal">
+  <div class="project-list">
+    {% for p in projects %}
+      <a class="project-row" href="{{ url_for('project_detail', project_id=p.id) }}">
+        <i class="bullet submitted"></i>
+        <span class="meta">
+          <span class="name">{{ p.name }}</span>
+          <span class="muted mono">截止 {{ p.deadline.strftime('%Y-%m-%d %H:%M') }}{% if p.tasks %} · {{ p.progress[0] }}/{{ p.progress[1] }} 步{% endif %}</span>
+        </span>
+        <i class="ph ph-caret-right go"></i>
+      </a>
+    {% else %}
+      <div class="empty"><i class="ph ph-archive float"></i><strong>还没有已提交的作业。</strong>在项目页点“已提交”，它就会归档到这里。</div>
+    {% endfor %}
+  </div>
 </div>
 {% endblock %}

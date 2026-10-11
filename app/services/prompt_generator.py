@@ -59,7 +59,7 @@ Return JSON only:
   "deliverables": ["final things handed in"],
   "risks": ["risk and how to avoid it"],
   "decisions_needed": [{{"id": "D1", "question": "...", "options": [{{"label": "...", "effect": "what changes if chosen"}}]}}],
-  "ai_role": "who the other AI chat should act as for this project, one or two sentences, no invented credentials",
+  "ai_role": "who the other AI chat should act as for this project, one or two sentences, no invented credentials; do not limit it to guiding only or forbid it from writing (the student decides how much help to take)",
   "assumptions_used": ["which assumed requirements the framework relies on"]}}
 {MIN_PHASES} to {MAX_PHASES} phases, each with 2 to 6 steps. Write everything in English."""
     data = ai_client.ask_gemini_json(prompt)

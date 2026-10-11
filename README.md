@@ -1,8 +1,59 @@
 # Assignment Helper
 
-A web app that helps students get assignments done on time: clarify what the task really asks, turn it into a solid AI prompt, split the work into daily tasks before the deadline, find real academic papers, and draft the write-up.
+A web app that helps university students get assignments done on time: clarify what the task really asks, turn it into a solid AI prompt, split the work into daily tasks before the deadline, find real academic papers, and draft the write-up one approved section at a time.
 
-I built it to learn how to integrate an LLM API into a real backend: authentication, a database, server-side AI calls, structured output, and graceful failure handling.
+> **Status: portfolio project.** It runs locally and comes with a self-contained [demo mode](#try-the-demo-2-minutes) that uses only fictional sample data and sends nothing to outside services. It is not deployed and has no real users.
+
+![Overview](docs/screenshots/02-overview.png)
+
+## Why I built it
+
+Students rarely fail an assignment because they can't write. They fail because they misread the brief, start too late, or cite sources they never checked. General AI chats make this worse: they happily guess the requirements, invent references, and produce one big answer with no plan behind it.
+
+I wanted a tool that does the opposite, and I wanted to learn how to put an LLM inside a real backend properly: accounts, a database, server-side AI calls, structured output that is validated in code, and failures that degrade gracefully.
+
+- **Requirements first.** Nothing downstream is generated until the gaps in the brief have been asked about or explicitly marked as assumptions.
+- **The AI proposes, the code decides.** Dates, citations, quotes from the guideline and paper IDs are all checked in code. The model can't invent a deadline, a rule or a reference.
+- **The student stays in charge.** Every AI result is a draft to review, edit and approve.
+
+## Try the demo (2 minutes)
+
+Demo mode needs no API keys and makes no outside calls: the AI and the paper search answer from built-in samples, and sign-up, Google sign-in, email and push are switched off.
+
+```bash
+git clone https://github.com/LimFangXuan/AI-based-assignment-helper-Active-Development.git
+cd AI-based-assignment-helper-Active-Development
+python -m venv venv
+venv\Scripts\activate            # macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt
+set DEMO_MODE=1                  # macOS/Linux: export DEMO_MODE=1   (PowerShell: $env:DEMO_MODE="1")
+set SECRET_KEY=any-long-random-string
+python run.py                    # open http://127.0.0.1:5000 and press "Enter the demo"
+```
+
+What you get:
+
+- A one-click demo account with six fictional projects. One of them has already been through all five tools, so every screen has something to show.
+- A banner on every page, and a **Reset demo data** button that puts everything back to the original sample (it also resets on every restart).
+- All five tools still work on new projects, with offline sample answers in place of Gemini and fictional papers (example `10.5555` DOIs) in place of OpenAlex.
+- Settings is read-only apart from the theme and **Download my data**.
+
+Please don't type personal information into the demo. It runs on your own machine, but it is meant for sample data only.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Project tool chain](docs/screenshots/03-project-tool-chain.png) | ![Requirements questions](docs/screenshots/04-requirements-questions.png) |
+| **Project page**: the five tools in dependency order, each showing its state. | **Requirements Checklist**: questions only about real gaps in the brief. |
+| ![Prompt ready](docs/screenshots/07-prompt-ready.png) | ![AI plan draft](docs/screenshots/09-ai-plan-draft.png) |
+| **Prompt Generator**: a confirmed framework and a code-assembled prompt. | **Task Planner**: a day-by-day draft to review before anything is saved. |
+| ![Paper Finder](docs/screenshots/13-paper-finder.png) | ![Report Drafter](docs/screenshots/15-report-drafter.png) |
+| **Paper Finder**: picks come only from papers that were really retrieved. | **Report Drafter**: one section at a time, citations checked in code. |
+| ![Dark theme](docs/screenshots/20-overview-dark.png) | ![Demo login](docs/screenshots/01-demo-login.jpg) |
+| **Dark theme**. | **Demo mode** sign-in page. |
+
+<img src="docs/screenshots/30-mobile-overview.png" alt="Mobile overview" width="260">
 
 ## The workflow
 
@@ -20,22 +71,33 @@ Later tools never lock: they show a hint when an earlier step is missing. Anythi
 
 Paper Finder and Report Drafter are hidden for *Portfolio* and *Exam preparation* projects. The type is chosen by the student, not guessed by the AI.
 
-## Features
+## Tech stack
 
-- **Accounts**: register / login / logout with salted password hashes, or **Continue with Google** (sign in or sign up). Failed logins are rate-limited per username and address. **Forgot password** emails a one-time reset link (1 hour), and password or email changes send a security notice.
-- **Email and push notifications**: confirm your email, then choose a **daily summary** (today's tasks, overdue tasks, deadlines today, at the hour you pick in your own time zone) and **deadline reminders** (3 days and 1 day before), each by email, push, or both. Push works per device (Chrome, Edge, Firefox, Android; Safari and iPhone once the site is added to the Home Screen). Nothing is on until you turn it on.
-- **Settings**: change username and optional email (confirmed by link); change password (or set one if you signed up with Google); connect or disconnect Google; notification settings and devices; light / dark theme; a plain-language **Privacy & data** section; **Download my data** (JSON); **Delete account** (removes everything).
-- **Projects**: name, deadline, description (the task itself), guideline / marking rubric, type, individual or group, citation style. Live character counters.
-- **Overview**: a status ring (Not started / In progress / Ready to submit) with counts, today's and the next six days' task counts, then one card per project with a status filter.
-- **Today** and **Next 6 days**: tasks across all projects, grouped by day, ticked off in place.
-- **Calendar**: month grid of deadlines with a month strip, `+N more` for busy days, today marked.
-- **Sidebar**: create button, main menu, the 8 nearest projects with status dots, and an Overview badge for projects that are overdue or due within 3 days. Collapsible (remembered per browser); a drawer on phones.
-- **Tasks**: add (press Enter to keep adding), inline edit, tick, delete, drag to reorder. The project status follows: the first tick sets *In progress*, the last one *Ready to submit*.
-- **Submit / delete**: submitting is a soft delete (status `submitted`, data kept, can be moved back). Delete permanently removes a project after a confirmation dialog.
-- **Stale detection**: requirements checks, frameworks, planned tasks and report drafts store a fingerprint of the description + guideline; if either changes later, the tool says "Details changed since this was created. Update?". Nothing is re-run automatically (that would spend AI quota).
-- **Light and dark themes**, chosen in Settings.
+| Layer | Choice | Why |
+|---|---|---|
+| Backend | Python 3, Flask 3 (app factory + blueprints) | Small enough to understand completely; easy to test with the built-in test client. |
+| Database | SQLite via Flask-SQLAlchemy | Zero setup for a single-machine app. `ensure_schema()` upgrades old databases in place without losing data. |
+| AI | Google Gemini (`google-genai`), primary + fallback model | Structured JSON output, validated in code. Model names live in `.env`. |
+| Papers | OpenAlex REST API (`httpx`) | Free, open scholarly metadata with real DOIs. |
+| Front end | Jinja templates, hand-written CSS (light + dark tokens), vanilla JS | No build step. Every action is a plain form POST that JS upgrades to an in-place update. |
+| Auth & mail | Salted password hashes, Google OAuth (code + PKCE), SMTP, Web Push (VAPID, `pywebpush`) | All optional. Each one explains itself when it isn't configured. |
+| Tests | One script, `test_app.py`: 504 checks | AI, OpenAlex, Google, SMTP and push are all faked, so the tests never touch the network. |
 
 ## Architecture
+
+```mermaid
+flowchart LR
+    B[Browser<br/>Jinja pages + app.js] -->|form POST / fetch| BP[Blueprints<br/>auth · overview · projects · tools · settings]
+    BP --> M[(SQLite<br/>SQLAlchemy models)]
+    BP --> S[Services<br/>requirements · prompt · planner · papers · report]
+    S --> AI[ai_client.py] -->|JSON, validated| G[(Gemini)]
+    S --> OA[openalex_client.py] --> O[(OpenAlex)]
+    BP --> N[mailer.py · push.py · google_auth.py]
+    AI -. DEMO_MODE=1 .-> DA[demo_ai.py<br/>offline answers]
+    OA -. DEMO_MODE=1 .-> DP[demo_papers.py<br/>fictional papers]
+```
+
+Each outside service has exactly one module that talks to it (`ai_client`, `openalex_client`, `google_auth`, `mailer`, `push`). That makes it easy to fake in tests and to switch off in demo mode. The services layer never imports Flask request objects or models, so the logic can be tested without a browser.
 
 ```
 run.py                     entry point (python run.py, or a WSGI server pointed at run:app)
@@ -51,14 +113,13 @@ app/
   account_mail.py          sends confirmation, reset and security emails
   reminders.py             daily summary and deadline reminders, per user time zone, never sent twice
   urls.py                  full links for emails and push (APP_BASE_URL)
-send_reminders.py          run this on a schedule (hourly) to send reminders
-generate_vapid_keys.py     prints a VAPID key pair for push
+  demo_data.py             the fictional sample data (seed_demo.py and demo mode share it)
   constants.py             statuses, types, length limits, thresholds (one place to tune)
   tools_registry.py        the five tools, their order and visibility
   schema.py                ensure_schema(): new tables, missing columns, indexes
   template_helpers.py      template filters and sidebar data (one query)
   models/                  user, project, requirements, prompt, plan (tasks), paper, report
-  blueprints/              auth, overview (/, /today, /upcoming), calendar, projects, tools/*
+  blueprints/              auth, overview (/, /today, /upcoming), calendar, projects, settings, cron, demo, tools/*
   services/                no Flask request objects and no imports from models
     ai_client.py           the only module that talks to Gemini
     openalex_client.py     the only module that talks to OpenAlex
@@ -73,14 +134,34 @@ generate_vapid_keys.py     prints a VAPID key pair for push
     paper_finder.py        search terms and candidate selection
     report_drafter.py      outline, section drafts, citation markers, export
     citations.py           in-text citations and reference lists from metadata (APA 7, Harvard, IEEE, MLA, Chicago)
+    demo_mode.py           DEMO_MODE=1 switch
+    demo_ai.py             offline stand-in for Gemini in demo mode (answers each task type from the prompt)
+    demo_papers.py         offline stand-in for OpenAlex in demo mode (fictional papers, 10.5555 example DOIs)
   skills/                  plain data files: rules, question banks, best practices, the 12 requirement aspects,
                            report templates (FYP, Report)
   templates/               layout.html, components/, pages/
   static/                  style.css (design tokens, light + dark), app.js
-test_app.py                automated tests (AI and OpenAlex are mocked)
-seed_demo.py               local demo account with sample data
+test_app.py                automated tests (AI, OpenAlex, Google, SMTP and push are all mocked)
+seed_demo.py               local demo account with sample data (demo / demo1234)
+send_reminders.py          run this on a schedule (hourly) to send reminders
+generate_vapid_keys.py     prints a VAPID key pair for push
 check_models.py            checks which Gemini models currently work
 ```
+
+## Features
+
+- **Accounts**: register / login / logout with salted password hashes, or **Continue with Google** (sign in or sign up). Failed logins are rate-limited per username and address. **Forgot password** emails a one-time reset link (1 hour), and password or email changes send a security notice.
+- **Email and push notifications**: confirm your email, then choose a **daily summary** (today's tasks, overdue tasks, deadlines today, at the hour you pick in your own time zone) and **deadline reminders** (3 days and 1 day before), each by email, push, or both. Push works per device (Chrome, Edge, Firefox, Android; Safari and iPhone once the site is added to the Home Screen). Nothing is on until you turn it on.
+- **Settings**: change username and optional email (confirmed by link); change password (or set one if you signed up with Google); connect or disconnect Google; notification settings and devices; light / dark theme; a plain-language **Privacy & data** section; **Download my data** (JSON); **Delete account** (removes everything).
+- **Projects**: name, deadline, description (the task itself), guideline / marking rubric, type, individual or group, citation style. Live character counters.
+- **Overview**: a status ring (Not started / In progress / Ready to submit) with counts, today's and the next six days' task counts, then one card per project with a status filter.
+- **Today** and **Next 6 days**: tasks across all projects, grouped by day, ticked off in place.
+- **Calendar**: month grid of deadlines with a month strip, `+N more` for busy days, today marked.
+- **Sidebar**: create button, main menu, the 8 nearest projects with status dots, and an Overview badge for projects that are overdue or due within 3 days. Collapsible (remembered per browser); a drawer on phones.
+- **Tasks**: add (press Enter to keep adding), inline edit, tick, delete, drag to reorder. The project status follows: the first tick sets *In progress*, the last one *Ready to submit*.
+- **Submit / delete**: submitting is a soft delete (status `submitted`, data kept, can be moved back). Delete permanently removes a project after a confirmation dialog.
+- **Stale detection**: requirements checks, frameworks, planned tasks and report drafts store a fingerprint of the description + guideline; if either changes later, the tool says "Details changed since this was created. Update?". Nothing is re-run automatically (that would spend AI quota).
+- **Light and dark themes**, chosen in Settings.
 
 ## Design decisions
 
@@ -103,7 +184,9 @@ check_models.py            checks which Gemini models currently work
 - **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project and child record (other users get 404), identical error for unknown user vs wrong password, Jinja auto-escaping.
 - **Schema upgrades without data loss.** `ensure_schema()` runs inside `create_app()`, so any start-up path works on a fresh database. Missing columns are added with `ALTER TABLE ... ADD COLUMN`; columns and tables are never dropped. Old projects get `type = other`, `individual` and an empty guideline.
 
-## Setup
+## Running the full app (with real AI)
+
+The full app needs your own API keys. Calls to Gemini and OpenAlex send the project text (with emails and phone numbers masked) to those services, and free-tier Gemini inputs may be used by Google to improve its models. For showing the project to someone, [demo mode](#try-the-demo-2-minutes) is the safer choice.
 
 Optional, for **Continue with Google**: in Google Cloud Console create an OAuth client ID (type *Web application*), add `http://127.0.0.1:5000/auth/google/callback` as an authorised redirect URI (plus your public URL when deployed), and put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Open the app on the same host you registered (`127.0.0.1` and `localhost` are different to Google). Without these the button explains that Google sign-in isn't set up.
 
@@ -113,14 +196,14 @@ venv\Scripts\activate          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env           # then fill in SECRET_KEY, GEMINI_API_KEY, OPENALEX_API_KEY
 python run.py                  # http://127.0.0.1:5000
-python seed_demo.py            # optional: local demo account with sample data
+python seed_demo.py            # optional: sample data, log in as demo / demo1234
 ```
 
 Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Get a Gemini key at https://aistudio.google.com and a free OpenAlex key at https://openalex.org/settings/api. Free-tier Gemini inputs may be used by Google to improve its models, so don't paste sensitive material.
 
 Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. Never enable it on a public server: the Werkzeug debugger can run code.
 
-## Your setup checklist
+## Optional services checklist
 
 Everything below is optional: without it the app still runs, and each feature explains what's missing.
 
@@ -140,15 +223,25 @@ Everything below is optional: without it the app still runs, and each feature ex
 python test_app.py
 ```
 
-464 checks covering the email service (console and SMTP, failures, header injection), confirmation and reset links (expiry, tampering, single use, no account enumeration, rate limits), the push service including real encryption and VAPID signatures checked by a simulated browser, subscriptions, notification settings, the reminder engine (time zones, once per day, 72 / 24 hour deadlines, failures retried, dead devices removed), the cron entry point, the Google flow against a mocked Google (PKCE, state, replay, unverified email, no automatic merge, linking, disconnecting), every Settings action, login throttling, the data export and account deletion,  the Requirements Checklist (pre-scan, rounds, conflict evidence, the internal round cap, finishing with assumptions, stale detection), the Prompt Generator (blocked by open conflicts, decisions, corrections, the code-built prompt and what it must and must not contain), the Report Drafter (outline, unlock order, invented citations removed, needs-source flags, APA and IEEE),  auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
+504 checks. Nothing touches the network: the AI is replaced by a fake that answers by task type, and OpenAlex, Google, SMTP and Web Push are faked with `httpx.MockTransport` and stub objects. They cover:
 
-## Known limits
+- **Demo mode**: closed pages, blocked account changes, one-click entry, reset, all five tools working offline, and no network connections at all.
+- **The five tools**: requirement rounds and conflict evidence, framework decisions, the code-built prompt, date clamping in the planner, invented paper IDs dropped, invented citations removed.
+- **Failure handling**: simulated 503/429/403/timeout/network failures and model fallback, including a real SDK call against a deliberately slow local server.
+- **Accounts and security**: auth and CSRF, per-user isolation on every route, login throttling, the Google flow (PKCE, state, replay, no automatic merge), email confirmation and reset links (expiry, tampering, single use, no account enumeration).
+- **Notifications**: the SMTP and console mailer, push encryption and VAPID signatures checked by a simulated browser, and the reminder engine (time zones, once per day, retries, dead devices removed).
+- **Data**: export, account deletion, starting on a fresh database, and upgrading an old database without losing data.
 
-- AI-generated content (questions, frameworks, drafts) is written in English.
-- Reminders only go out when the scheduled job runs, so they are as punctual as that schedule (hourly is recommended). If two copies of the job run at the same moment, a reminder could in rare cases be sent twice.
-- Push on iPhone only works once the site is added to the Home Screen (an Apple limitation).
-- Harvard, MLA and Chicago reference entries use a simplified format; check them against the guideline.
-- Drag-to-reorder doesn't work on touch screens; AI calls are synchronous; not deployed yet.
+## Honest limitations
+
+- **Not deployed.** It runs on one machine with SQLite. A public version would need a production WSGI server, HTTPS, a real database, a scheduler for reminders, and a privacy policy.
+- **AI calls are synchronous.** A long Gemini call holds a request thread. A real deployment would move them to a background queue.
+- **Demo mode answers are canned.** They follow the real data shapes and react to your input, but they are not real AI output. Run the full app to see Gemini.
+- **Login throttling is in memory**, so it resets on restart and isn't shared between processes.
+- **The AI writes in English only.** Harvard, MLA and Chicago reference entries use a simplified format.
+- Reminders are only as punctual as the scheduled job (hourly is recommended). If two copies run at the same moment, a reminder could in rare cases be sent twice.
+- Push on iPhone only works once the site is added to the Home Screen (an Apple limitation). Drag-to-reorder doesn't work on touch screens.
+- Pages load the Geist font from Google Fonts and the icon set from unpkg, so a visitor's browser contacts those CDNs. Nothing typed into the app is sent with those requests.
 - The description/guideline limits (20,000 / 8,000 characters, 26,000 sent to the AI) are tentative.
 
 ## Checking which models work right now
@@ -159,3 +252,7 @@ python check_models.py gemini-3.8-flash gemini-3.5-flash-lite
 ```
 
 Model IDs are retired over time, so the primary and fallback models live in `.env`, not in the code, and any 404 from the primary model triggers the fallback.
+
+## More
+
+- [Case study](docs/CASE_STUDY.md): the problem, key decisions, what went wrong, and a guided tour of the code for reviewers.

@@ -10,6 +10,8 @@ import re
 import httpx
 from dotenv import load_dotenv
 
+from . import demo_mode, demo_papers
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,8 @@ class OpenAlexError(Exception):
 
 def _http_client():
     """单独成函数：测试时替换成 httpx.MockTransport，就不会发出真实请求。"""
+    if demo_mode.enabled():  # 作品集演示：离线样本论文，不连 OpenAlex
+        return httpx.Client(base_url=BASE_URL, transport=httpx.MockTransport(demo_papers.handler))
     return httpx.Client(base_url=BASE_URL, timeout=TIMEOUT_SECONDS)
 
 
@@ -126,7 +130,7 @@ def search_works(query, per_page=15, oa_only=True):
 
     oa_only=True 时只要开放获取的论文：先用官方的过滤参数，拿回结果后代码再检查一次。
     """
-    api_key = os.getenv("OPENALEX_API_KEY")
+    api_key = os.getenv("OPENALEX_API_KEY") or ("offline-demo" if demo_mode.enabled() else "")
     if not api_key:
         raise OpenAlexError("Paper search is not set up yet (missing OpenAlex API key). Please contact the administrator.")
 

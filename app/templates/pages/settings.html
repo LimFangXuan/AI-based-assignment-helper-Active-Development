@@ -23,9 +23,13 @@
 
 {% block content %}
 <div class="reveal settings">
+  {% if demo_mode %}
+  <div class="notice" style="margin:0;"><i class="ph ph-info"></i><span>In the portfolio demo you can look around, but account changes, emails, push notifications and connected accounts are turned off. Appearance and “Download my data” still work.</span></div>
+  {% endif %}
   <section class="card" id="profile" aria-labelledby="profile-h">
     <h2 id="profile-h">Profile</h2>
     <form method="POST" action="{{ url_for('settings.profile') }}">
+      <fieldset class="plain-fieldset" {% if demo_mode %}disabled{% endif %}>
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <div class="form-grid">
         <div>
@@ -42,6 +46,7 @@
         <button class="btn" type="submit"><i class="ph ph-check"></i>Save profile</button>
         {% if g.user.created_at %}<span class="muted small">Member since {{ g.user.created_at.strftime('%d %b %Y') }}</span>{% endif %}
       </div>
+      </fieldset>
     </form>
     {% if g.user.email %}
       <div class="setting-row" style="margin-top:16px;">
@@ -66,6 +71,7 @@
       <p class="muted" style="margin:6px 0 0;">You signed up with Google, so there is no password yet. Setting one lets you also log in with your username, and lets you disconnect Google later.</p>
     {% endif %}
     <form method="POST" action="{{ url_for('settings.password') }}">
+      <fieldset class="plain-fieldset" {% if demo_mode %}disabled{% endif %}>
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       {% if g.user.has_password %}
         <label for="current_password">Current password</label>
@@ -86,11 +92,15 @@
       </div>
       <p class="field-hint" style="margin-top:8px;">Forgot it later? On the log-in page, &ldquo;Forgot password?&rdquo; emails you a reset link, as long as your email address is confirmed.</p>
       <div class="btn-row" style="margin-top:14px;"><button class="btn" type="submit"><i class="ph ph-lock-key"></i>{{ 'Update password' if g.user.has_password else 'Set password' }}</button></div>
+      </fieldset>
     </form>
   </section>
 
   <section class="card" id="notifications" aria-labelledby="notifications-h">
     <h2 id="notifications-h">Notifications</h2>
+    {% if demo_mode %}
+    <p class="muted" style="margin:6px 0 0;">Daily summaries and deadline reminders by email or push. Turned off in the portfolio demo, so no messages are ever sent.</p>
+    {% else %}
     <p class="muted" style="margin:6px 0 0;">Get a daily summary of what is due, and a reminder before each deadline, by email, as a push notification, or both. Everything is off until you turn it on.</p>
     {% if not mail_enabled %}
       <div class="notice" style="margin:12px 0 0;"><i class="ph ph-info"></i><span>Email is turned off on this server.</span></div>
@@ -167,10 +177,14 @@
         <button class="btn outline small" type="submit" {% if not devices %}disabled title="Enable push on a device first"{% endif %}><i class="ph ph-bell"></i>Send a test push</button>
       </form>
     </div>
+    {% endif %}
   </section>
 
   <section class="card" id="connected" aria-labelledby="connected-h">
     <h2 id="connected-h">Connected accounts</h2>
+    {% if demo_mode %}
+    <p class="muted" style="margin:6px 0 0;">Google sign-in is turned off in the portfolio demo.</p>
+    {% else %}
     <div class="setting-row">
       <span class="provider-logo">{{ google_logo() }}</span>
       <div class="setting-main">
@@ -191,6 +205,7 @@
     {% if g.user.google_sub and not g.user.has_password %}
       <div class="notice" style="margin:12px 0 0;"><i class="ph ph-info"></i><span>Google is the only way to log in right now. Set a password above before disconnecting it.</span></div>
     {% endif %}
+    {% endif %}
   </section>
 
   <section class="card" id="appearance" aria-labelledby="appearance-h">
@@ -206,6 +221,10 @@
   <section class="card" id="privacy" aria-labelledby="privacy-h">
     <h2 id="privacy-h">Privacy &amp; data</h2>
     <div class="privacy-list">
+      {% if demo_mode %}
+      <div><strong>In this demo</strong>
+        <p class="muted">Nothing leaves the app: the AI and paper search answer from built-in samples, and no emails or notifications are sent. All data is sample data and is reset on restart. The rest of this section describes the full app.</p></div>
+      {% endif %}
       <div><strong>What is stored</strong>
         <p class="muted">Your username, optional email, a salted password hash (never the password itself), and your work: {{ project_count }} project{{ 's' if project_count != 1 }}
           with tasks, requirement checks, prompts, papers and report drafts. Nothing is shared with other users, and nothing is sold.</p></div>
@@ -233,6 +252,9 @@
 
   <section class="card danger-zone" id="delete" aria-labelledby="delete-h">
     <h2 id="delete-h">Delete account</h2>
+    {% if demo_mode %}
+    <p class="muted" style="margin:6px 0 0;">Turned off in the portfolio demo. Use “Reset demo data” at the top instead.</p>
+    {% else %}
     <p class="muted" style="margin:6px 0 0;">This permanently deletes your account and every project, task, prompt, paper and report draft. It can't be undone. Download your data first if you want a copy.</p>
     <form method="POST" action="{{ url_for('settings.delete_account') }}"
           data-confirm="Your account and all your data will be gone for good." data-confirm-title="Delete your account?"
@@ -253,6 +275,7 @@
       </div>
       <div class="btn-row" style="margin-top:14px;"><button class="btn danger" type="submit"><i class="ph ph-trash"></i>Delete my account</button></div>
     </form>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from flask import Flask
 
 from .extensions import db
+from .services import demo_mode
 
 
 def create_app():
@@ -20,12 +21,12 @@ def create_app():
     db.init_app(app)
 
     from . import security, template_helpers
-    from .blueprints import auth, calendar, cron, overview, projects, settings
+    from .blueprints import auth, calendar, cron, demo, overview, projects, settings
     from .blueprints.tools import papers, planner, prompt, report, requirements
 
     app.before_request(security.check_csrf)
     template_helpers.register(app)
-    for module in (auth, overview, calendar, projects, settings, cron, requirements, prompt, planner, papers, report):
+    for module in (auth, overview, calendar, projects, settings, cron, demo, requirements, prompt, planner, papers, report):
         app.register_blueprint(module.bp)
 
     @app.route("/sw.js")
@@ -43,4 +44,8 @@ def create_app():
 
     with app.app_context():
         ensure_schema()
+        if demo_mode.enabled():  # 作品集演示：每次启动都从干净的示例数据开始
+            from . import demo_data
+
+            demo_data.reset()
     return app

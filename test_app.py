@@ -40,6 +40,7 @@ os.environ.pop("GEMINI_API_KEY", None)
 os.environ.pop("OPENALEX_API_KEY", None)
 assert not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENALEX_API_KEY")
 REAL_GENERATE = ai_client._generate
+REAL_OA_HTTP = openalex_client._http_client
 ORIGINAL_MODEL, ORIGINAL_FALLBACK = ai_client.MODEL_NAME, ai_client.FALLBACK_MODEL
 ai_client.RETRY_WAIT_SECONDS = 0
 app.config["TESTING"] = True
@@ -2138,6 +2139,150 @@ check("旧用户得到通知默认值：邮箱未验证、时区 UTC、8 点、�
       old_notify == [(0, "UTC", 8, 0, 0, 0, 0)] and {"push_subscription", "notification_log"} <= new_tables)
 check("email 和 google_sub 有唯一索引", user_indexes.get("ix_user_email") == 1 and user_indexes.get("ix_user_google_sub") == 1)
 check("升级后的旧项目能正常打开 Overview 和项目页", result.stdout.strip().endswith("200 200"), result.stdout + result.stderr[-300:])
+
+# ================= 12. 作品集演示模式（DEMO_MODE=1） =================
+import socket  # noqa: E402
+
+from app import demo_data  # noqa: E402
+from app.services import google_auth, mailer  # noqa: E402
+
+net_attempts = []
+real_connect, real_create = socket.socket.connect, socket.create_connection
+
+
+def no_network(*a, **k):
+    net_attempts.append(a[1:] if len(a) > 1 else a)
+    raise OSError("network blocked in demo test")
+
+
+socket.socket.connect = no_network
+socket.create_connection = no_network
+saved_env = {k: os.environ.get(k) for k in ("DEMO_MODE", "OPENALEX_API_KEY", "MAIL_BACKEND", "SMTP_HOST")}
+os.environ.pop("OPENALEX_API_KEY", None)
+os.environ["MAIL_BACKEND"], os.environ["SMTP_HOST"] = "smtp", "smtp.example.com"
+os.environ["GOOGLE_CLIENT_ID"], os.environ["GOOGLE_CLIENT_SECRET"] = "test-client", "test-secret"
+ai_client._generate = REAL_GENERATE      # 演示模式的离线回答写在真实实现的第一行
+openalex_client._http_client = REAL_OA_HTTP
+
+dc = app.test_client()
+check("关闭演示模式时 /demo/enter 和 /demo/reset 是 404",
+      post(dc, "/demo/enter").status_code == 404 and post(dc, "/demo/reset").status_code == 404)
+check("关闭演示模式时邮件和 Google 按原设置开启", mailer.backend() == "smtp" and google_auth.configured())
+
+os.environ["DEMO_MODE"] = "1"
+check("演示模式：邮件关闭、Google 登入关闭", mailer.backend() == "off" and not mailer.enabled() and not google_auth.configured())
+html = dc.get("/login").get_data(as_text=True)
+check("演示模式登录页只有“Enter the demo”，没有密码框、Google、注册和忘记密码",
+      "Enter the demo" in html and 'name="password"' not in html and "/auth/google" not in html
+      and "/register" not in html and "/forgot-password" not in html)
+for url in ["/register", "/forgot-password", "/reset-password/abc", "/verify-email/abc", "/auth/google",
+            "/auth/google/callback?code=x&state=y"]:
+    r = dc.get(url)
+    check(f"演示模式关闭 {url}（跳回登录页）", r.status_code == 302 and r.location.endswith("/login"), r.status_code)
+r = post(dc, "/register", {"username": "intruder", "password": "secret12"})
+with app.app_context():
+    check("演示模式不能注册新账号", r.status_code == 302 and not user_row("intruder"))
+check("演示模式定时入口是 404",
+      dc.post("/cron/reminders", headers={"Authorization": "Bearer cron-secret-token"}).status_code == 404)
+
+r = post(dc, "/demo/enter")
+check("一键进入演示，直接到 Overview", r.status_code == 302 and r.location.endswith("/"))
+html = dc.get("/").get_data(as_text=True)
+check("每页都有演示提示条和 “Reset demo data”", "Portfolio demo." in html and "Reset demo data" in html
+      and "Chatbots for First-Year Student Support" in html)
+with app.app_context():
+    demo_user = user_row(demo_data.DEMO_USERNAME)
+    demo_projects = Project.query.filter_by(user_id=demo_user.id).all()
+    check("演示账号没有可用密码，邮箱是 example.com", not demo_user.has_password and demo_user.email.endswith("@example.com"))
+    check("示例数据：6 个项目，其中一个五个工具都有内容", len(demo_projects) == 6 and any(
+        p.requirements_checks and p.prompt_sessions and p.tasks and p.paper_searches and p.report_drafts for p in demo_projects))
+check("演示账号用户名密码登录不了", post(app.test_client(), "/login", {"username": "demo", "password": ""}).status_code != 302)
+
+html = dc.get("/settings").get_data(as_text=True)
+check("Settings 能打开，并说明哪些功能在演示里关闭", "turned off" in html and "Nothing leaves the app" in html
+      and "Delete my account" not in html and "disabled" in html)
+for url, data in [("/settings/profile", {"username": "hacker", "email": "x@example.com"}),
+                  ("/settings/password", {"new_password": "newpass12", "confirm_password": "newpass12"}),
+                  ("/settings/delete", {"confirm": "demo"}), ("/settings/notifications", {"notify_email_digest": "1"}),
+                  ("/settings/email/resend", {}), ("/settings/google/disconnect", {}), ("/settings/notifications/test", {})]:
+    r = post(dc, url, data)
+    check(f"演示模式拦下 {url}", r.status_code == 302 and r.location.endswith("/settings"))
+r = post(dc, "/settings/push/subscribe", {"endpoint": "https://push.example/x"}, headers={"X-Requested-With": "fetch"})
+check("演示模式拦下推送订阅（fetch 返回 403 JSON）", r.status_code == 403 and r.get_json()["ok"] is False)
+with app.app_context():
+    u = user_row(demo_data.DEMO_USERNAME)
+    check("被拦下后演示账号没变", u is not None and u.username == "demo" and not u.has_password and not user_attr("demo", "notify_email_digest"))
+r = post(dc, "/settings/export")
+check("演示模式仍可下载自己的数据", r.status_code == 200 and "Chatbots for First-Year Student Support" in r.get_data(as_text=True))
+
+# --- 五个工具离线走完 ---
+r = post(dc, "/projects/new", {"name": "Demo Walkthrough", "deadline": "2030-06-01T09:00", "type": "report",
+                               "description": "Write a short report comparing two study techniques."})
+dpid = int(r.location.rsplit("/", 1)[1])
+post(dc, f"/projects/{dpid}/tools/requirements/start")
+with app.app_context():
+    chk = latest(RequirementsCheck, project_id=dpid)
+    first_questions, first_finished = len(chk.questions), chk.finished
+    chk_id = chk.id
+check("演示 AI：需求预扫描给出问题", first_questions > 0 and not first_finished, first_questions)
+post(dc, f"/projects/{dpid}/tools/requirements/{chk_id}/answers", {"q0_text": "A clear comparison table", "q1_text": "My tutor"})
+with app.app_context():
+    chk = latest(RequirementsCheck, project_id=dpid)
+    check("演示 AI：回答一轮后需求全部清楚", chk.finished and all(a["state"] != "unclear" for a in chk.aspects))
+post(dc, f"/projects/{dpid}/tools/prompt/generate")
+with app.app_context():
+    ps = latest(PromptSession, project_id=dpid)
+    check("演示 AI：生成 framework（含待决定事项）", ps is not None and ps.framework and len(ps.framework.get("phases", [])) == 4
+          and ps.framework["decisions_needed"])
+    choice = ps.framework["decisions_needed"][0]["options"][0]["label"]
+post(dc, f"/projects/{dpid}/tools/prompt/{ps.id}/decide", {"D1": choice})
+with app.app_context():
+    ps = latest(PromptSession, project_id=dpid)
+    check("演示 AI：做出决定后重新生成，不再有待决定事项", not ps.framework["decisions_needed"])
+    ps_id = ps.id
+post(dc, f"/projects/{dpid}/tools/prompt/{ps_id}/confirm")
+with app.app_context():
+    check("framework 确认成功，生成最终 prompt", bool(latest(PromptSession, project_id=dpid).final_prompt))
+html = post(dc, f"/projects/{dpid}/tools/planner/draft").get_data(as_text=True)
+titles = re.findall(r'name="title" value="([^"]+)"', html)
+check("演示 AI：任务计划草稿", len(titles) >= 4, len(titles))
+r = post(dc, f"/projects/{dpid}/tools/papers/new", {"count": "4", "oa_only": "1"})
+with app.app_context():
+    search = latest(PaperSearch, project_id=dpid)
+    papers = Paper.query.filter_by(search_id=search.id).all() if search else []
+    check("演示论文库：离线返回虚构论文（10.5555 示例 DOI）", 1 <= len(papers) <= 4
+          and all("10.5555/demo." in (p.doi or "") for p in papers), len(papers))
+post(dc, f"/projects/{dpid}/tools/report/outline")
+with app.app_context():
+    draft = db.session.get(ReportDraft, latest(ReportDraft, project_id=dpid).id)
+    draft_id, sec_id, outline_len = draft.id, draft.sections[0].id, len(draft.outline["sections"])
+check("演示 AI：报告大纲", outline_len >= 3, outline_len)
+post(dc, f"/projects/{dpid}/tools/report/{draft_id}/sections/{sec_id}/write")
+with app.app_context():
+    sec = db.session.get(ReportSection, sec_id)
+    check("演示 AI：写出一节并引用示例论文", sec.status == "draft" and len(sec.content or "") > 200 and re.search(r"\[P\d+\]", sec.content or "") and len(json.loads(sec.cited_paper_ids_json)) >= 1, sec.status)
+
+# --- 重置 ---
+r = post(dc, "/demo/reset")
+html = dc.get(r.location).get_data(as_text=True)
+with app.app_context():
+    u = user_row(demo_data.DEMO_USERNAME)
+    names = sorted(p.name for p in Project.query.filter_by(user_id=u.id))
+check("Reset demo data：恢复成原来的 6 个项目，新建的项目消失",
+      len(names) == 6 and "Demo Walkthrough" not in names and "reset to the original sample" in html)
+check("演示模式全程没有任何网络连接", net_attempts == [], net_attempts[:3])
+
+socket.socket.connect, socket.create_connection = real_connect, real_create
+for k, v in saved_env.items():
+    if v is None:
+        os.environ.pop(k, None)
+    else:
+        os.environ[k] = v
+check("关闭演示模式后恢复正常", google_auth.configured()
+      and post(app.test_client(), "/demo/enter").status_code == 404)
+os.environ.pop("SMTP_HOST", None)
+os.environ["MAIL_BACKEND"] = "off"
+
 
 if failed:
     print(f"\n{len(failed)} 项失败（{passed} 项通过）：")

@@ -35,6 +35,17 @@
           {% endfor %}
         </nav>
       </div>
+      {% if demo_mode %}
+      <div class="demo-banner" role="note">
+        <i class="ph ph-flask"></i>
+        <span><strong>Portfolio demo.</strong> Everything here is sample data and nothing you type leaves the app. Please don't enter personal information.</span>
+        <form method="POST" action="{{ url_for('demo.reset') }}" style="margin:0 0 0 auto;"
+              data-confirm="All demo data goes back to the original sample. Changes you made are lost." data-confirm-title="Reset the demo data?" data-confirm-ok="Reset">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn outline small" type="submit"><i class="ph ph-arrow-counter-clockwise"></i>Reset demo data</button>
+        </form>
+      </div>
+      {% endif %}
       <div class="page {% block page_class %}{% endblock %}">
         <header class="page-head reveal">
           <div>

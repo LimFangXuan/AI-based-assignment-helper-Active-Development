@@ -14,6 +14,8 @@ import ssl
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
 
+from . import demo_mode
+
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 15
@@ -30,6 +32,8 @@ class MailError(Exception):
 
 
 def backend():
+    if demo_mode.enabled():  # 作品集演示：完全不发邮件
+        return "off"
     forced = os.getenv("MAIL_BACKEND", "").strip().lower()
     if forced in ("smtp", "console", "off"):
         return forced

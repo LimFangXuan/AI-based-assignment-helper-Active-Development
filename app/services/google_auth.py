@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from . import demo_mode
+
 logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)  # 请求日志会带上完整网址
 
@@ -42,6 +44,8 @@ def client_secret():
 
 
 def configured():
+    if demo_mode.enabled():  # 作品集演示：没有 Google 登入
+        return False
     return bool(client_id() and client_secret())
 
 

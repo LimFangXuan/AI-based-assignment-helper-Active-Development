@@ -724,3 +724,15 @@ details[open] > summary { margin-bottom: 6px; }
 .device-list li:hover { background: var(--surface-2); }
 .narrow-auth { grid-template-columns: 1fr; }
 .narrow-auth .auth-form { min-height: calc(100dvh - 24px); }
+
+
+/* ---------- 作品集演示模式 ---------- */
+.demo-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 12px 14px 0; padding: 10px 16px;
+  border-radius: 14px; background: var(--yellow-soft); color: color-mix(in srgb, var(--yellow) 60%, var(--text)); font-size: .88rem; }
+.demo-banner > .ph { font-size: 20px; }
+.demo-banner span { flex: 1; min-width: 220px; }
+.demo-facts { list-style: none; padding: 0; margin: 16px 0 12px; display: grid; gap: 10px; }
+.demo-facts li { display: flex; gap: 10px; align-items: flex-start; font-size: .92rem; color: var(--text-2); }
+.demo-facts .ph { font-size: 18px; color: var(--muted); margin-top: 2px; }
+.plain-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.plain-fieldset:disabled { opacity: .55; }

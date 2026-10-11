@@ -14,7 +14,7 @@ from ..constants import DIGEST_LAST_HOUR, MAX_PUSH_DEVICES
 from ..extensions import db
 from ..models import PushSubscription
 from ..security import login_required
-from ..services import google_auth, mailer, push
+from ..services import demo_mode, google_auth, mailer, push
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -49,7 +49,7 @@ TIMEZONES = _timezones()
 def index():
     return render_template("pages/settings.html", google_enabled=google_auth.configured(),
                            project_count=len(g.user.projects), mail_enabled=mailer.enabled(), mail_real=mailer.real(),
-                           vapid_key=push.public_key(), timezones=TIMEZONES, digest_last_hour=DIGEST_LAST_HOUR,
+                           vapid_key="" if demo_mode.enabled() else push.public_key(), timezones=TIMEZONES, digest_last_hour=DIGEST_LAST_HOUR,
                            devices=sorted(g.user.push_subscriptions, key=lambda d: d.created_at, reverse=True),
                            email_ready=reminders.email_usable(g.user))
 

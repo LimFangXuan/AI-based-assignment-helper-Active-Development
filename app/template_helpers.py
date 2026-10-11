@@ -7,6 +7,7 @@ from .constants import (CITATION_STYLES, DUE_SOON_DAYS, SIDEBAR_PROJECT_LIMIT, S
                         TYPE_LABELS, WORK_MODES)
 from .models import Project
 from .security import get_csrf_token
+from .services import demo_mode
 
 
 def relday(d):
@@ -69,6 +70,6 @@ def register(app):
         return {
             "now": datetime.now(), "today": date.today(),
             "STATUS_LABELS": STATUS_LABELS, "TYPE_LABELS": TYPE_LABELS, "TYPE_GROUPS": TYPE_GROUPS,
-            "WORK_MODES": WORK_MODES, "CITATION_STYLES": CITATION_STYLES,
+            "WORK_MODES": WORK_MODES, "CITATION_STYLES": CITATION_STYLES, "demo_mode": demo_mode.enabled(),
             **sidebar_context(),
         }

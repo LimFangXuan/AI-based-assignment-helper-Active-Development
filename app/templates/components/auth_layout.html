@@ -18,6 +18,21 @@
   </aside>
   <section class="auth-form">
     <div class="inner reveal">
+      {% if demo_mode %}
+      <h2>Portfolio demo</h2>
+      <p class="muted">A working copy of the app filled with sample data, so you can click through every feature.</p>
+      <ul class="demo-facts">
+        <li><i class="ph ph-database"></i>All projects, papers and drafts are made-up sample data.</li>
+        <li><i class="ph ph-wifi-slash"></i>The AI and paper search answer from built-in samples. Nothing you type leaves the app.</li>
+        <li><i class="ph ph-prohibit"></i>Sign-up, Google sign-in, emails and push notifications are turned off.</li>
+        <li><i class="ph ph-arrow-counter-clockwise"></i>The data resets on restart, or whenever you press “Reset demo data”.</li>
+      </ul>
+      <form method="POST" action="{{ url_for('demo.enter') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn block" type="submit" style="margin-top:8px;">Enter the demo<i class="ph ph-arrow-right"></i></button>
+      </form>
+      <p class="muted small" style="margin-top:14px;">Please don't enter personal information.</p>
+      {% else %}
       <h2>{{ 'Welcome back' if mode == 'login' else 'Create your account' }}</h2>
       <p class="muted">{{ 'Log in to continue with your assignments.' if mode == 'login' else 'Use your Google account, or just pick a username and a password.' }}</p>
       <a class="btn outline block google-btn" href="{{ url_for('auth.google_start') }}">
@@ -43,6 +58,7 @@
         <p class="muted">No account yet? <a class="link" href="{{ url_for('auth.register') }}">Create one</a></p>
       {% else %}
         <p class="muted">Already have an account? <a class="link" href="{{ url_for('auth.login') }}">Log in</a></p>
+      {% endif %}
       {% endif %}
     </div>
   </section>

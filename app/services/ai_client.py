@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import errors, types
 
+from . import demo_ai, demo_mode
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ def _call_model(client, model, prompt, config, attempts):
 
 def _generate(prompt, json_mode=False):
     """真正发请求的函数（含重试和备用模型）。测试时可以替换掉它，不会消耗额度。"""
+    if demo_mode.enabled():  # 作品集演示：用离线样本回答，不把任何内容发给 Gemini
+        return demo_ai.respond(prompt)
     client = _get_client()
     config = None
     if json_mode:

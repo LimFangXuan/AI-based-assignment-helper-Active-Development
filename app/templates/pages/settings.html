@@ -1,12 +1,103 @@
 {% extends "layout.html" %}
 {% set page_title = "Settings" %}
-{% set page_desc = "Appearance and account." %}
+{% set page_desc = "Your profile, sign-in options, appearance, and what happens to your data." %}
 {% set crumbs = [("Settings", None)] %}
 {% set crumb_icon = "ph-gear-six" %}
 {% block page_class %}narrow{% endblock %}
+
+{% macro google_logo() -%}
+<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2045c0-.638-.0573-1.2518-.1636-1.8409H9v3.4814h4.8436c-.2086 1.125-.8427 2.0782-1.7959 2.7164v2.2581h2.9087c1.7018-1.5668 2.6836-3.874 2.6836-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.4673-.806 5.9564-2.1805l-2.9087-2.2581c-.8059.54-1.8368.859-3.0477.859-2.344 0-4.3282-1.5831-5.036-3.7104H.9574v2.3318C2.4382 15.9832 5.4818 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.2822-1.1168-.2822-1.71s.1023-1.17.2823-1.71V4.9582H.9573A8.9965 8.9965 0 0 0 0 9c0 1.4523.3477 2.8268.9573 4.0418L3.964 10.71z"/><path fill="#EA4335" d="M9 3.5795c1.3214 0 2.5077.4541 3.4405 1.346l2.5813-2.5814C13.4632.8918 11.426 0 9 0 5.4818 0 2.4382 2.0168.9573 4.9582L3.964 7.29C4.6718 5.1627 6.656 3.5795 9 3.5795z"/></svg>
+{%- endmacro %}
+
+{% block under_heading %}
+<nav class="settings-nav chips" aria-label="Settings sections">
+  <a class="chip" href="#profile">Profile</a>
+  <a class="chip" href="#security">Security</a>
+  <a class="chip" href="#connected">Connected accounts</a>
+  <a class="chip" href="#appearance">Appearance</a>
+  <a class="chip" href="#privacy">Privacy &amp; data</a>
+  <a class="chip danger-chip" href="#delete">Delete account</a>
+</nav>
+{% endblock %}
+
 {% block content %}
-<div class="reveal">
-  <section class="card" aria-labelledby="appearance-h">
+<div class="reveal settings">
+  <section class="card" id="profile" aria-labelledby="profile-h">
+    <h2 id="profile-h">Profile</h2>
+    <form method="POST" action="{{ url_for('settings.profile') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-grid">
+        <div>
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" value="{{ g.user.username }}" minlength="3" maxlength="80" required autocomplete="username">
+        </div>
+        <div>
+          <label for="email">Email <span class="opt">(optional)</span></label>
+          <input type="text" id="email" name="email" value="{{ g.user.email or '' }}" maxlength="254" autocomplete="email" inputmode="email">
+        </div>
+      </div>
+      <p class="field-hint" style="margin-top:8px;">Your email is only kept so you can tell which Google account belongs here. It is never shown to anyone, and the app sends no emails.</p>
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn" type="submit"><i class="ph ph-check"></i>Save profile</button>
+        {% if g.user.created_at %}<span class="muted small">Member since {{ g.user.created_at.strftime('%d %b %Y') }}</span>{% endif %}
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="security" aria-labelledby="security-h">
+    <h2 id="security-h">{{ 'Change password' if g.user.has_password else 'Set a password' }}</h2>
+    {% if not g.user.has_password %}
+      <p class="muted" style="margin:6px 0 0;">You signed up with Google, so there is no password yet. Setting one lets you also log in with your username, and lets you disconnect Google later.</p>
+    {% endif %}
+    <form method="POST" action="{{ url_for('settings.password') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      {% if g.user.has_password %}
+        <label for="current_password">Current password</label>
+        <div class="pw-wrap"><input type="password" id="current_password" name="current_password" required autocomplete="current-password">
+          <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button></div>
+      {% endif %}
+      <div class="form-grid">
+        <div>
+          <label for="new_password">New password <span class="opt">(at least 8 characters)</span></label>
+          <div class="pw-wrap"><input type="password" id="new_password" name="new_password" required minlength="8" autocomplete="new-password">
+            <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button></div>
+        </div>
+        <div>
+          <label for="confirm_password">Repeat new password</label>
+          <div class="pw-wrap"><input type="password" id="confirm_password" name="confirm_password" required minlength="8" autocomplete="new-password">
+            <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button></div>
+        </div>
+      </div>
+      <p class="field-hint" style="margin-top:8px;">Resetting a forgotten password by email isn't available yet, so keep this one somewhere safe.</p>
+      <div class="btn-row" style="margin-top:14px;"><button class="btn" type="submit"><i class="ph ph-lock-key"></i>{{ 'Update password' if g.user.has_password else 'Set password' }}</button></div>
+    </form>
+  </section>
+
+  <section class="card" id="connected" aria-labelledby="connected-h">
+    <h2 id="connected-h">Connected accounts</h2>
+    <div class="setting-row">
+      <span class="provider-logo">{{ google_logo() }}</span>
+      <div class="setting-main">
+        <strong>Google</strong>
+        <div class="muted small">{% if g.user.google_sub %}Connected. You can log in with “Continue with Google”.{% else %}Not connected. Connect it to log in without a password.{% endif %}</div>
+      </div>
+      {% if g.user.google_sub %}
+        <form method="POST" action="{{ url_for('settings.google_disconnect') }}" style="margin:0;"
+              data-confirm="You will need your username and password to log in. Your projects stay as they are."
+              data-confirm-title="Disconnect Google?" data-confirm-ok="Disconnect">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn outline small" type="submit">Disconnect</button>
+        </form>
+      {% else %}
+        <a class="btn outline small" href="{{ url_for('auth.google_start', intent='link') }}">Connect</a>
+      {% endif %}
+    </div>
+    {% if g.user.google_sub and not g.user.has_password %}
+      <div class="notice" style="margin:12px 0 0;"><i class="ph ph-info"></i><span>Google is the only way to log in right now. Set a password above before disconnecting it.</span></div>
+    {% endif %}
+  </section>
+
+  <section class="card" id="appearance" aria-labelledby="appearance-h">
     <h2 id="appearance-h">Appearance</h2>
     <p class="muted small" style="margin:4px 0 14px;">Saved in this browser only.</p>
     <div class="segmented" role="radiogroup" aria-label="Theme" data-theme-choice>
@@ -15,12 +106,54 @@
       <label><input type="radio" name="theme" value="dark"><span><i class="ph ph-moon"></i>Dark</span></label>
     </div>
   </section>
-  <section class="card" aria-labelledby="account-h">
-    <h2 id="account-h">Account</h2>
-    <p class="muted" style="margin:6px 0 16px;">Signed in as <strong style="color:var(--text)">{{ g.user.username }}</strong>.</p>
-    <form method="POST" action="{{ url_for('auth.logout') }}">
+
+  <section class="card" id="privacy" aria-labelledby="privacy-h">
+    <h2 id="privacy-h">Privacy &amp; data</h2>
+    <div class="privacy-list">
+      <div><strong>What is stored</strong>
+        <p class="muted">Your username, optional email, a salted password hash (never the password itself), and your work: {{ project_count }} project{{ 's' if project_count != 1 }}
+          with tasks, requirement checks, prompts, papers and report drafts. Nothing is shared with other users, and nothing is sold.</p></div>
+      <div><strong>What is sent to the AI</strong>
+        <p class="muted">When you use a tool, the project's name, deadline, type, description and guideline plus your answers are sent to Google's Gemini API. Emails and phone numbers are masked first,
+          but other personal details are not, so don't enter addresses or ID numbers. Depending on Google's terms for the plan in use, inputs may be used to improve its models.</p></div>
+      <div><strong>What is sent to the paper database</strong>
+        <p class="muted">Only short English search terms go to OpenAlex, never your description or guideline.</p></div>
+      <div><strong>Cookies and local storage</strong>
+        <p class="muted">One session cookie keeps you logged in. Your theme and sidebar choices are saved in this browser. There is no tracking or advertising.</p></div>
+    </div>
+    <hr class="soft">
+    <div class="setting-row">
+      <span class="provider-logo"><i class="ph ph-download-simple"></i></span>
+      <div class="setting-main"><strong>Download my data</strong>
+        <div class="muted small">Everything above as one JSON file: your profile (without the password hash) and all projects.</div></div>
+      <form method="POST" action="{{ url_for('settings.export') }}" style="margin:0;">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button class="btn outline small" type="submit">Download</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card danger-zone" id="delete" aria-labelledby="delete-h">
+    <h2 id="delete-h">Delete account</h2>
+    <p class="muted" style="margin:6px 0 0;">This permanently deletes your account and every project, task, prompt, paper and report draft. It can't be undone. Download your data first if you want a copy.</p>
+    <form method="POST" action="{{ url_for('settings.delete_account') }}"
+          data-confirm="Your account and all your data will be gone for good." data-confirm-title="Delete your account?"
+          data-confirm-ok="Delete everything" data-danger="1">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <button class="btn outline" type="submit"><i class="ph ph-sign-out"></i>Log out</button>
+      <div class="form-grid">
+        <div>
+          <label for="confirm_username">Type your username (<strong>{{ g.user.username }}</strong>) to confirm</label>
+          <input type="text" id="confirm_username" name="confirm_username" required autocomplete="off">
+        </div>
+        {% if g.user.has_password %}
+        <div>
+          <label for="delete_password">Your password</label>
+          <div class="pw-wrap"><input type="password" id="delete_password" name="current_password" required autocomplete="current-password">
+            <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button></div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="btn-row" style="margin-top:14px;"><button class="btn danger" type="submit"><i class="ph ph-trash"></i>Delete my account</button></div>
     </form>
   </section>
 </div>

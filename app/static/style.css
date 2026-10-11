@@ -678,3 +678,25 @@ details > summary { cursor: pointer; color: var(--text-2); font-size: .9rem; fon
 details > summary:hover { color: var(--text); }
 details[open] > summary { margin-bottom: 6px; }
 .ref-list { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; font-size: .9rem; }
+
+/* ---------- 登录页的 Google 按钮 ---------- */
+.google-btn { margin-top: 18px; gap: 10px; padding: 11px 16px; }
+.or-divider { display: flex; align-items: center; gap: 12px; margin: 18px 0 2px; color: var(--muted); font-size: .82rem; }
+.or-divider::before, .or-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+
+/* ---------- Settings ---------- */
+.settings { display: grid; gap: 18px; scroll-behavior: smooth; }
+.settings > .card, .settings > .card + .card { margin-top: 0; scroll-margin-top: 90px; }
+.settings-nav { margin-top: 14px; }
+.settings-nav .chip { text-decoration: none; }
+.chip.danger-chip:hover { background: var(--red-soft); color: var(--red); }
+.setting-row { display: flex; align-items: center; gap: 14px; }
+.setting-main { flex: 1; min-width: 0; }
+.provider-logo { width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--border); font-size: 20px; }
+.privacy-list { display: grid; gap: 14px; margin-top: 12px; }
+.privacy-list p { margin: 2px 0 0; font-size: .92rem; }
+.danger-zone { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+.danger-zone h2 { color: var(--red); }
+@media (max-width: 560px) { .setting-row { flex-wrap: wrap; } }
+.card > h2 + .setting-row { margin-top: 14px; }

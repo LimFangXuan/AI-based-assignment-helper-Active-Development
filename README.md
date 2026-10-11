@@ -22,7 +22,8 @@ Paper Finder and Report Drafter are hidden for *Portfolio* and *Exam preparation
 
 ## Features
 
-- **Accounts**: register / login / logout, salted password hashes, session auth.
+- **Accounts**: register / login / logout with salted password hashes, or **Continue with Google** (sign in or sign up). Failed logins are rate-limited per username and address.
+- **Settings**: change username and optional email; change password (or set one if you signed up with Google); connect or disconnect Google; light / dark theme; a plain-language **Privacy & data** section; **Download my data** (JSON); **Delete account** (removes everything).
 - **Projects**: name, deadline, description (the task itself), guideline / marking rubric, type, individual or group, citation style. Live character counters.
 - **Overview**: a status ring (Not started / In progress / Ready to submit) with counts, today's and the next six days' task counts, then one card per project with a status filter.
 - **Today** and **Next 6 days**: tasks across all projects, grouped by day, ticked off in place.
@@ -41,6 +42,9 @@ app/
   __init__.py              create_app(): config, extensions, blueprints, CSRF hook, ensure_schema()
   extensions.py            db = SQLAlchemy()
   security.py              login_required, CSRF, ownership checks, safe redirects
+  validators.py            username / password / email rules shared by sign-up, Settings and Google sign-up
+  login_throttle.py        in-memory limit on repeated failed logins and password checks
+  data_export.py           builds the "Download my data" file
   constants.py             statuses, types, length limits, thresholds (one place to tune)
   tools_registry.py        the five tools, their order and visibility
   schema.py                ensure_schema(): new tables, missing columns, indexes
@@ -51,6 +55,7 @@ app/
     ai_client.py           the only module that talks to Gemini
     openalex_client.py     the only module that talks to OpenAlex
     privacy.py             masks emails and phone numbers before text reaches the AI
+    google_auth.py         the only module that talks to Google OAuth (authorization code + PKCE)
     common.py              shared helpers: project block (data, not instructions), input-size check, quote check
     requirements_checker.py  Requirements Checklist: pre-scan, rounds, validation, context for later tools
     prompt_generator.py    framework generation and code-assembled final prompt
@@ -82,10 +87,13 @@ check_models.py            checks which Gemini models currently work
 - **Graceful degradation.** Every AI request has a timeout; 5xx errors are retried; an overloaded, slow, out-of-quota or missing primary model falls back to a second model. Errors a different model can't fix (bad key, bad request) don't trigger a fallback. Users see a plain message; the real error goes to the log.
 - **Works without JavaScript.** Every action is a normal form POST; `app.js` upgrades it to an in-place update (requests carry `X-Requested-With: fetch` and get JSON back). The `next` redirect target is restricted to same-site paths.
 - **Motion has a job.** Animations mark a state change (tick, progress, new row, dialog, AI waiting) and are switched off under `prefers-reduced-motion`. Status is always shown as text too, never by colour alone.
+- **Google sign-in is hard to abuse.** Authorization code flow with a random `state` (checked in constant time, single use) and PKCE; the client secret never reaches the browser; accounts are matched by Google's stable ID, not the email; only Google-verified emails are accepted. A Google email that matches an existing password account is **not** merged automatically (emails entered here are unverified, so merging would let someone take over an account by registering with its email): the user logs in and connects Google from Settings instead.
 - **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project and child record (other users get 404), identical error for unknown user vs wrong password, Jinja auto-escaping.
 - **Schema upgrades without data loss.** `ensure_schema()` runs inside `create_app()`, so any start-up path works on a fresh database. Missing columns are added with `ALTER TABLE ... ADD COLUMN`; columns and tables are never dropped. Old projects get `type = other`, `individual` and an empty guideline.
 
 ## Setup
+
+Optional, for **Continue with Google**: in Google Cloud Console create an OAuth client ID (type *Web application*), add `http://127.0.0.1:5000/auth/google/callback` as an authorised redirect URI (plus your public URL when deployed), and put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Open the app on the same host you registered (`127.0.0.1` and `localhost` are different to Google). Without these the button explains that Google sign-in isn't set up.
 
 ```bash
 python -m venv venv
@@ -106,11 +114,12 @@ Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. 
 python test_app.py
 ```
 
-258 checks covering the Requirements Checklist (pre-scan, rounds, conflict evidence, the internal round cap, finishing with assumptions, stale detection), the Prompt Generator (blocked by open conflicts, decisions, corrections, the code-built prompt and what it must and must not contain), the Report Drafter (outline, unlock order, invented citations removed, needs-source flags, APA and IEEE),  auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
+330 checks covering the Google flow against a mocked Google (PKCE, state, replay, unverified email, no automatic merge, linking, disconnecting), every Settings action, login throttling, the data export and account deletion,  the Requirements Checklist (pre-scan, rounds, conflict evidence, the internal round cap, finishing with assumptions, stale detection), the Prompt Generator (blocked by open conflicts, decisions, corrections, the code-built prompt and what it must and must not contain), the Report Drafter (outline, unlock order, invented citations removed, needs-source flags, APA and IEEE),  auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
 
 ## Known limits
 
 - AI-generated content (questions, frameworks, drafts) is written in English.
+- Forgotten passwords can't be reset by email yet (the app sends no email); the Google button is the recovery route for accounts that have one connected.
 - Harvard, MLA and Chicago reference entries use a simplified format; check them against the guideline.
 - Drag-to-reorder doesn't work on touch screens; AI calls are synchronous; not deployed yet.
 - The description/guideline limits (20,000 / 8,000 characters, 26,000 sent to the AI) are tentative.

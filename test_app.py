@@ -83,7 +83,7 @@ def post(c, url, data=None, **kw):
     return c.post(url, data=d, **kw)
 
 
-def register(c, username, password="secret1"):
+def register(c, username, password="secret12"):
     return post(c, "/register", {"username": username, "password": password})
 
 
@@ -215,7 +215,7 @@ check("伪造令牌 -> 400", c.post("/login", data={"username": "a", "password":
 
 # ================= 2. 注册 / 登录 =================
 check("用户名太短被拒绝", "3 to 80" in register(c, "ab").get_data(as_text=True))
-check("密码太短被拒绝", "at least 6" in register(c, "alice", "123").get_data(as_text=True))
+check("密码太短被拒绝", "at least 8" in register(c, "alice", "123").get_data(as_text=True))
 check("注册成功并跳转", register(c, "alice").status_code == 302)
 check("注册后自动登录", "Overview" in c.get("/").get_data(as_text=True))
 post(c, "/logout")
@@ -225,7 +225,7 @@ for u, p in [("alice", "wrong"), ("nobody", "wrong")]:
     html = post(c, "/login", {"username": u, "password": p}).get_data(as_text=True)
     msgs.append(re.search(r'class="flash error">(.*?)<', html).group(1))
 check("密码错误和用户名不存在提示相同", msgs[0] == msgs[1] == "Incorrect username or password.")
-check("登录成功", post(c, "/login", {"username": "alice", "password": "secret1"}).status_code == 302)
+check("登录成功", post(c, "/login", {"username": "alice", "password": "secret12"}).status_code == 302)
 
 # ================= 3. 项目 =================
 check("空 Dashboard 有提示", "No active projects" in c.get("/").get_data(as_text=True))
@@ -1055,13 +1055,301 @@ check("删除后访问 -> 404", cd.get(f"/projects/{tpid}").status_code == 404)
 fresh_db = Path(TMP, "fresh.db")
 script = ("from app import create_app\nc = create_app().test_client()\nc.get('/login')\n"
           "with c.session_transaction() as s: t = s['_csrf_token']\n"
-          "r = c.post('/register', data={'_csrf_token': t, 'username': 'zoe', 'password': 'secret1'})\n"
+          "r = c.post('/register', data={'_csrf_token': t, 'username': 'zoe', 'password': 'secret12'})\n"
           "print(r.status_code)")
 env = dict(os.environ, DATABASE_URL="sqlite:///" + fresh_db.as_posix(), SECRET_KEY="x")
 env.pop("GEMINI_API_KEY", None)
 result = subprocess.run([sys.executable, "-c", script], cwd=str(Path(__file__).resolve().parent),
                         env=env, capture_output=True, text=True)
 check("全新数据库：不经过 python run.py 也能直接注册", result.stdout.strip().endswith("302"), result.stderr[-300:])
+
+# ================= 9d. 账号：Google 登录、Settings、防暴力破解 =================
+import base64  # noqa: E402
+import hashlib  # noqa: E402
+from urllib.parse import parse_qs, urlparse  # noqa: E402
+
+from app import login_throttle  # noqa: E402
+from app.models import User  # noqa: E402
+from app.services import google_auth  # noqa: E402
+
+login_throttle.reset_all()
+for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"):
+    os.environ.pop(k, None)
+
+
+def user_row(username):
+    with app.app_context():
+        u = User.query.filter_by(username=username).first()
+        return None if u is None else SimpleNamespace(id=u.id, username=u.username, email=u.email, google_sub=u.google_sub,
+                                                      has_password=u.has_password, hash=u.password_hash)
+
+
+def user_count():
+    with app.app_context():
+        return User.query.count()
+
+
+cg = app.test_client()
+check("登录页和注册页都有 Continue with Google", "Continue with Google" in cg.get("/login").get_data(as_text=True)
+      and "Continue with Google" in cg.get("/register").get_data(as_text=True))
+r = cg.get("/auth/google")
+check("服务器没配置 Google：跳回登录页并给出清楚提示", r.status_code == 302 and "not set up" in cg.get(r.location).get_data(as_text=True))
+
+os.environ["GOOGLE_CLIENT_ID"], os.environ["GOOGLE_CLIENT_SECRET"] = "test-client", "test-secret"
+g_state = {"profile": {}, "token_status": 200, "requests": []}
+
+
+def g_handler(request):
+    g_state["requests"].append(request)
+    url = str(request.url)
+    if url.startswith(google_auth.TOKEN_URL):
+        return httpx.Response(g_state["token_status"], json={"access_token": "tok"} if g_state["token_status"] == 200 else {"error": "invalid_grant"})
+    if url.startswith(google_auth.USERINFO_URL):
+        if request.headers.get("Authorization") != "Bearer tok":
+            return httpx.Response(401, json={})
+        return httpx.Response(200, json=g_state["profile"])
+    raise AssertionError("意外的请求：" + url)
+
+
+google_auth._http_client = lambda: httpx.Client(transport=httpx.MockTransport(g_handler))
+
+
+def google_flow(client, profile, start="/auth/google", state=None, extra=None, follow=False):
+    """走完一遍：开始 -> （Google）-> 回调。返回 (开始时的参数, 回调的响应)。"""
+    g_state.update(profile=profile, requests=[])
+    s = client.get(start)
+    q = parse_qs(urlparse(s.location).query) if s.status_code == 302 and "accounts.google.com" in s.location else {}
+    params = {"code": "auth-code", "state": state if state is not None else (q.get("state") or [""])[0]}
+    params.update(extra or {})
+    return q, client.get("/auth/google/callback", query_string=params, follow_redirects=follow)
+
+
+def gp(sub, email, verified=True, name="Test User"):
+    return {"sub": sub, "email": email, "email_verified": verified, "name": name}
+
+
+s = cg.get("/auth/google")
+q = parse_qs(urlparse(s.location).query)
+check("开始登录：跳到 Google，带 client_id、回调地址、scope、state、PKCE、每次选账号",
+      s.location.startswith(google_auth.AUTH_URL) and q["client_id"] == ["test-client"]
+      and q["redirect_uri"] == ["http://localhost/auth/google/callback"] and q["response_type"] == ["code"]
+      and "email" in q["scope"][0] and len(q["state"][0]) >= 30 and q["code_challenge_method"] == ["S256"]
+      and q["prompt"] == ["select_account"])
+check("client secret 和 PKCE verifier 不会出现在跳转网址里", "test-secret" not in s.location)
+
+# --- 新用户：用 Google 注册 ---
+q, r = google_flow(cg, gp("g-111", "nora.lim@Example.com", name="Nora Lim"))
+token_req = next(x for x in g_state["requests"] if str(x.url).startswith(google_auth.TOKEN_URL))
+body = parse_qs(token_req.content.decode())
+challenge = base64.urlsafe_b64encode(hashlib.sha256(body["code_verifier"][0].encode()).digest()).rstrip(b"=").decode()
+check("PKCE：换 token 时的 code_verifier 和开始时的 code_challenge 对得上", challenge == q["code_challenge"][0])
+check("client secret 只在服务器直接发给 Google 的请求体里，授权码和回调地址一起提交",
+      body["client_secret"] == ["test-secret"] and body["code"] == ["auth-code"] and body["grant_type"] == ["authorization_code"]
+      and body["redirect_uri"] == ["http://localhost/auth/google/callback"])
+nora = user_row("nora.lim")
+check("用 Google 注册：创建账号，用户名取自邮箱，邮箱存小写，没有可用密码", r.status_code == 302 and r.location == "/" and nora
+      and nora.email == "nora.lim@example.com" and nora.google_sub == "g-111" and nora.has_password is False)
+html = cg.get("/").get_data(as_text=True)
+check("注册后已登录，并显示欢迎提示", "Welcome, nora.lim" in html and "Overview" in html)
+check("没有密码的账号不能用密码登录（提示和密码错误一样）", "Incorrect username or password" in post(
+    app.test_client(), "/login", {"username": "nora.lim", "password": nora.hash}).get_data(as_text=True))
+n = user_count()
+post(cg, "/logout")
+q, r = google_flow(cg, gp("g-111", "nora.lim@changed.example", name="Nora Lim"))
+check("再次用 Google 登录：还是同一个账号（以 Google ID 识别，不看邮箱），不会重复创建", r.location == "/"
+      and user_count() == n and "nora.lim" in cg.get("/").get_data(as_text=True))
+post(cg, "/logout")
+
+# --- 回调的各种异常 ---
+q, r = google_flow(cg, gp("g-999", "x@example.com"), state="wrong-state")
+check("state 不对：拒绝，且不会去向 Google 换 token", "cancelled or expired" in cg.get(r.location).get_data(as_text=True)
+      and not any(str(x.url).startswith(google_auth.TOKEN_URL) for x in g_state["requests"]) and user_row("x") is None)
+g_state["requests"] = []
+r = cg.get("/auth/google/callback", query_string={"code": "c", "state": q["state"][0] if q else "s"})
+check("没有开始就直接访问回调（或重放）：拒绝", "cancelled or expired" in cg.get(r.location).get_data(as_text=True))
+q, r = google_flow(cg, gp("g-999", "x@example.com"), extra={"error": "access_denied"})
+check("用户在 Google 页面点了取消：友好提示，不创建账号", "cancelled or expired" in cg.get(r.location).get_data(as_text=True)
+      and user_count() == n)
+q, r = google_flow(cg, gp("g-999", "x@example.com"))  # 先正常走一遍，再重放同一个回调
+state_used = q["state"][0]
+replay = cg.get("/auth/google/callback", query_string={"code": "auth-code", "state": state_used})
+check("回调只能用一次：重放同一个 state 被拒绝", "cancelled or expired" in cg.get(replay.location).get_data(as_text=True))
+post(cg, "/logout")
+n = user_count()
+g_state["token_status"] = 400
+q, r = google_flow(cg, gp("g-998", "y@example.com"))
+check("Google 拒绝授权码：友好提示，不创建账号", "did not accept" in cg.get(r.location).get_data(as_text=True) and user_count() == n)
+g_state["token_status"] = 200
+q, r = google_flow(cg, gp("g-997", "z@example.com", verified=False))
+check("邮箱没有经过 Google 验证：拒绝", "not verified" in cg.get(r.location).get_data(as_text=True) and user_count() == n)
+q, r = google_flow(cg, {"sub": "g-996", "email_verified": True})
+check("Google 没有给邮箱：拒绝", "did not share an email" in cg.get(r.location).get_data(as_text=True) and user_count() == n)
+google_auth._http_client = lambda: httpx.Client(transport=httpx.MockTransport(lambda req: (_ for _ in ()).throw(httpx.ConnectError("down"))))
+q, r = google_flow(cg, gp("g-995", "w@example.com"))
+check("连不上 Google：友好提示", "Could not reach Google" in cg.get(r.location).get_data(as_text=True) and user_count() == n)
+google_auth._http_client = lambda: httpx.Client(transport=httpx.MockTransport(g_handler))
+
+# --- 账号合并规则 ---
+register(app.test_client(), "kate")
+with app.app_context():
+    db.session.query(User).filter_by(username="kate").update({"email": "kate@example.com"})
+    db.session.commit()
+n = user_count()
+q, r = google_flow(cg, gp("g-222", "Kate@Example.com"))
+check("邮箱和已有的密码账号相同：不自动合并，提示先登录再到 Settings 连接",
+      "Log in with your password, then connect Google" in cg.get(r.location).get_data(as_text=True)
+      and user_count() == n and user_row("kate").google_sub is None)
+register(app.test_client(), "alice2")
+q, r = google_flow(cg, gp("g-333", "alice2@gmail.com"))
+check("用户名被占用：自动换一个不重复的新账号，原来的账号不受影响", user_count() == n + 2 and user_row("alice2").google_sub is None)
+with app.app_context():
+    new_name = User.query.filter_by(google_sub="g-333").first().username
+check("新用户名以邮箱前缀开头、不是已被占用的那个", new_name.startswith("alice2") and new_name != "alice2")
+post(cg, "/logout")
+
+# --- 在 Settings 里连接 / 断开 Google ---
+gina = app.test_client()
+register(gina, "gina")
+check("没登录不能走连接流程", app.test_client().get("/auth/google?intent=link").location.endswith("/login"))
+check("Settings 显示未连接", "Not connected" in gina.get("/settings").get_data(as_text=True))
+q, r = google_flow(gina, gp("g-444", "gina@example.com"), start="/auth/google?intent=link")
+gr = user_row("gina")
+check("连接 Google：记下 Google ID，邮箱为空时补上，回到 Settings", r.location.endswith("/settings#connected")
+      and gr.google_sub == "g-444" and gr.email == "gina@example.com")
+check("连接后 Settings 显示已连接", "Connected. You can log in" in gina.get("/settings").get_data(as_text=True))
+hank = app.test_client()
+register(hank, "hank")
+q, r = google_flow(hank, gp("g-444", "hank@example.com"), start="/auth/google?intent=link")
+check("这个 Google 账号已连到别人的账号：拒绝", "already connected to another account" in hank.get(r.location).get_data(as_text=True)
+      and user_row("hank").google_sub is None)
+check("断开前确认：POST 需要 CSRF", gina.post("/settings/google/disconnect").status_code == 400)
+post(gina, "/settings/google/disconnect")
+check("有密码的账号可以断开 Google", user_row("gina").google_sub is None)
+# 只用 Google 的账号：先要设置密码才能断开
+cn = app.test_client()
+q, r = google_flow(cn, gp("g-111", "nora.lim@example.com"))
+post(cn, "/settings/google/disconnect")
+check("只有 Google 的账号不能断开（否则就登不进去了）", user_row("nora.lim").google_sub == "g-111")
+check("Settings 提醒先设置密码", "Set a password above before disconnecting" in cn.get("/settings").get_data(as_text=True)
+      and "Set a password" in cn.get("/settings").get_data(as_text=True))
+post(cn, "/settings/password", {"new_password": "short", "confirm_password": "short"})
+check("设置密码也要满足长度", user_row("nora.lim").has_password is False)
+post(cn, "/settings/password", {"new_password": "nora-pass-1", "confirm_password": "nora-pass-1"})
+check("Google 注册的账号可以设置密码（不需要旧密码）", user_row("nora.lim").has_password is True)
+check("设置密码后可以用用户名密码登录", post(app.test_client(), "/login", {"username": "nora.lim", "password": "nora-pass-1"}).status_code == 302)
+post(cn, "/settings/google/disconnect")
+check("有了密码就可以断开 Google", user_row("nora.lim").google_sub is None)
+
+# --- 登录防暴力破解 ---
+login_throttle.reset_all()
+ivy = app.test_client()
+register(ivy, "ivy")
+post(ivy, "/logout")
+for _ in range(5):
+    post(ivy, "/login", {"username": "ivy", "password": "wrong-pass"})
+html = post(ivy, "/login", {"username": "ivy", "password": "secret12"}).get_data(as_text=True)
+check("连续失败 5 次后：即使密码正确也暂时拒绝，并说明要等多久", "Too many failed attempts" in html and "minute" in html)
+check("限制只针对这个用户名：别人不受影响", post(app.test_client(), "/login", {"username": "alice", "password": "secret12"}).status_code == 302)
+login_throttle.reset_all()
+check("限制解除后可以正常登录", post(ivy, "/login", {"username": "ivy", "password": "secret12"}).status_code == 302)
+for _ in range(3):
+    post(app.test_client(), "/login", {"username": "ivy", "password": "wrong-pass"})
+post(app.test_client(), "/login", {"username": "ivy", "password": "secret12"})
+check("登录成功会清零失败次数", not any("|ivy|" in k for k in login_throttle._failures))
+
+# --- Settings：权限与各项操作 ---
+anon = app.test_client()
+check("没登录不能打开 Settings", anon.get("/settings").status_code == 302 and "/login" in anon.get("/settings").location)
+check("Settings 的 POST 没有 CSRF 令牌 -> 400", all(ivy.post(f"/settings/{p}").status_code == 400
+                                                    for p in ("profile", "password", "export", "delete")))
+html = ivy.get("/settings").get_data(as_text=True)
+check("Settings 页面：个人资料、安全、已连接账号、外观、隐私与数据、删除账号", all(x in html for x in (
+    "Profile", "Change password", "Connected accounts", "Appearance", "Privacy &amp; data", "Delete account")))
+check("隐私说明：存了什么、发给 AI 什么、发给论文库什么、Cookie", all(x in html for x in (
+    "salted password hash", "Gemini", "OpenAlex", "session cookie", "Download my data")))
+
+# 个人资料
+post(ivy, "/settings/profile", {"username": "ivy-new", "email": "Ivy@Example.com"})
+iv = user_row("ivy-new")
+check("改用户名和邮箱：邮箱存小写，侧栏显示新名字", iv and iv.email == "ivy@example.com" and "ivy-new" in ivy.get("/").get_data(as_text=True))
+check("用户名太短被拒绝", "3 to 80" in ivy.get(post(ivy, "/settings/profile", {"username": "ab", "email": ""}).location).get_data(as_text=True))
+check("用户名和别人重复被拒绝（不分大小写）", "already taken" in ivy.get(post(ivy, "/settings/profile", {"username": "ALICE", "email": ""}).location).get_data(as_text=True))
+check("邮箱格式不对被拒绝", "valid email" in ivy.get(post(ivy, "/settings/profile", {"username": "ivy-new", "email": "not-an-email"}).location).get_data(as_text=True))
+check("邮箱被别的账号用了被拒绝", "already used" in ivy.get(post(ivy, "/settings/profile", {"username": "ivy-new", "email": "kate@example.com"}).location).get_data(as_text=True))
+post(ivy, "/settings/profile", {"username": "ivy-new", "email": ""})
+check("邮箱可以清空；保存自己原来的用户名不算重复", user_row("ivy-new").email is None)
+
+# 改密码
+old_hash = user_row("ivy-new").hash
+check("当前密码不对：拒绝，密码不变", "current password is not correct" in ivy.get(post(
+    ivy, "/settings/password", {"current_password": "nope", "new_password": "brand-new-1", "confirm_password": "brand-new-1"}).location).get_data(as_text=True)
+      and user_row("ivy-new").hash == old_hash)
+check("新密码太短被拒绝", "at least 8" in ivy.get(post(
+    ivy, "/settings/password", {"current_password": "secret12", "new_password": "short", "confirm_password": "short"}).location).get_data(as_text=True))
+check("两次输入不一致被拒绝", "The two new passwords" in ivy.get(post(
+    ivy, "/settings/password", {"current_password": "secret12", "new_password": "brand-new-1", "confirm_password": "brand-new-2"}).location).get_data(as_text=True))
+check("新密码和旧密码相同被拒绝", "different from the current" in ivy.get(post(
+    ivy, "/settings/password", {"current_password": "secret12", "new_password": "secret12", "confirm_password": "secret12"}).location).get_data(as_text=True))
+check("密码没有被以上失败的尝试改动", user_row("ivy-new").hash == old_hash)
+r = post(ivy, "/settings/password", {"current_password": "secret12", "new_password": "brand-new-1", "confirm_password": "brand-new-1"})
+check("改密码成功：仍然保持登录，旧密码失效，新密码有效", "Password changed" in ivy.get(r.location).get_data(as_text=True)
+      and ivy.get("/").status_code == 200 and user_row("ivy-new").hash != old_hash
+      and "Incorrect" in post(app.test_client(), "/login", {"username": "ivy-new", "password": "secret12"}).get_data(as_text=True)
+      and post(app.test_client(), "/login", {"username": "ivy-new", "password": "brand-new-1"}).status_code == 302)
+login_throttle.reset_all()
+for _ in range(5):
+    post(ivy, "/settings/password", {"current_password": "nope", "new_password": "brand-new-9", "confirm_password": "brand-new-9"})
+check("反复猜当前密码：同样被暂时拒绝", "Too many failed attempts" in ivy.get(post(
+    ivy, "/settings/password", {"current_password": "brand-new-1", "new_password": "brand-new-9", "confirm_password": "brand-new-9"}).location).get_data(as_text=True))
+login_throttle.reset_all()
+
+# 下载我的数据
+check("导出需要登录", anon.post("/settings/export").status_code in (302, 400))
+post(cd, f"/projects/{other_pid}/tools/planner/tasks", {"title": "导出里的步骤"})
+r = post(cd, "/settings/export")
+data = json.loads(r.get_data(as_text=True))
+names = [p["name"] for p in data["projects"]]
+check("导出：JSON 附件，包含账号和这个人的项目与任务", r.status_code == 200 and "attachment" in r.headers["Content-Disposition"]
+      and r.headers["Cache-Control"] == "no-store" and data["account"]["username"] == "dave" and "另一个作业" in names)
+check("导出：包含项目的步骤", "导出里的步骤" in [t["title"] for p in data["projects"] for t in p["tasks"]])
+check("导出：不含密码哈希，也没有别人的项目", "password" not in r.get_data(as_text=True).lower().replace("has_password", "")
+      and "作业助手" not in names and data["account"]["has_password"] is True)
+
+# 删除账号
+zed = app.test_client()
+register(zed, "zed")
+r = post(zed, "/projects/new", {"name": "要被删掉的项目", "deadline": "2030-01-01T09:00", "description": "x"})
+zpid = int(r.location.rsplit("/", 1)[1])
+post(zed, f"/projects/{zpid}/tools/planner/tasks", {"title": "要被删掉的步骤"})
+zid = user_row("zed").id
+check("输错用户名：不删除", "Type your username exactly" in zed.get(post(
+    zed, "/settings/delete", {"confirm_username": "ZED", "current_password": "secret12"}).location).get_data(as_text=True)
+      and user_row("zed") is not None)
+check("密码不对：不删除", "current password is not correct" in zed.get(post(
+    zed, "/settings/delete", {"confirm_username": "zed", "current_password": "wrong"}).location).get_data(as_text=True)
+      and user_row("zed") is not None)
+r = post(zed, "/settings/delete", {"confirm_username": "zed", "current_password": "secret12"})
+with app.app_context():
+    left = (Project.query.filter_by(user_id=zid).count(), Task.query.filter_by(project_id=zpid).count())
+check("删除账号：账号、项目、步骤全部删掉，跳到登录页并提示", r.location.endswith("/login") and user_row("zed") is None and left == (0, 0)
+      and "have been deleted" in zed.get(r.location).get_data(as_text=True))
+check("删除后原来的登录失效", zed.get("/").status_code == 302 and "Incorrect" in post(
+    app.test_client(), "/login", {"username": "zed", "password": "secret12"}).get_data(as_text=True))
+check("别人的数据不受影响", user_row("alice") is not None and user_row("dave") is not None)
+gz = app.test_client()
+q, r = google_flow(gz, gp("g-555", "gzed@example.com"))
+gzn = user_row("gzed")
+check("只用 Google 的账号：删除时不需要密码，只要输入用户名", "Your password" not in gz.get("/settings#delete").get_data(as_text=True).split('id="delete"')[1])
+post(gz, "/settings/delete", {"confirm_username": "gzed"})
+check("只用 Google 的账号输入用户名即可删除", user_row("gzed") is None and gzn is not None)
+
+# 部署在代理后面：可以指定固定的回调地址
+os.environ["GOOGLE_REDIRECT_URI"] = "https://app.example.com/auth/google/callback"
+q = parse_qs(urlparse(app.test_client().get("/auth/google").location).query)
+check("GOOGLE_REDIRECT_URI 可以覆盖自动生成的回调地址", q["redirect_uri"] == ["https://app.example.com/auth/google/callback"])
+for k in ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI"):
+    os.environ.pop(k, None)
+login_throttle.reset_all()
 
 # ================= 10. 旧数据库升级（v1 -> 重组后的版本）：真正调用 ensure_schema =================
 import subprocess  # noqa: E402
@@ -1096,6 +1384,9 @@ users = con.execute("SELECT username FROM user").fetchall()
 project_cols = {r[1] for r in con.execute("PRAGMA table_info(project)")}
 old_project = con.execute("SELECT name, description, type, work_mode, guideline, citation_style FROM project").fetchall()
 indexes = {r[1] for r in con.execute("PRAGMA index_list(project)")}
+user_cols = {r[1]: r for r in con.execute("PRAGMA table_info(user)")}
+user_indexes = {r[1]: r[2] for r in con.execute("PRAGMA index_list(user)")}
+old_user_has_password = con.execute("SELECT has_password, email, google_sub FROM user").fetchall()
 con.close()
 check("旧表补上新列，旧记录和用户都保留",
       {"diagnosis_json", "framework_json", "content_fingerprint", "requirements_check_id"} <= cols and sessions == 1
@@ -1103,6 +1394,9 @@ check("旧表补上新列，旧记录和用户都保留",
 check("旧项目得到默认值（other / individual / 空 guideline），描述不变",
       old_project == [("旧项目", "旧描述", "other", "individual", "", None)] and {"type", "guideline"} <= project_cols)
 check("补上 (user_id, deadline) 索引", "ix_project_user_deadline" in indexes)
+check("旧用户表补上 email / google_sub / has_password / created_at，旧用户保持“有密码”",
+      {"email", "google_sub", "has_password", "created_at"} <= set(user_cols) and old_user_has_password == [(1, None, None)])
+check("email 和 google_sub 有唯一索引", user_indexes.get("ix_user_email") == 1 and user_indexes.get("ix_user_google_sub") == 1)
 check("升级后的旧项目能正常打开 Overview 和项目页", result.stdout.strip().endswith("200 200"), result.stdout + result.stderr[-300:])
 
 if failed:

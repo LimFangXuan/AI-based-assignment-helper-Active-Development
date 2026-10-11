@@ -44,14 +44,14 @@
   </nav>
 
   <div class="side-foot">
-    <a class="side-link {% if ep == 'auth.settings' %}active{% endif %}" href="{{ url_for('auth.settings') }}" title="Settings"><i class="ph ph-gear-six"></i><span class="label">Settings</span></a>
+    <a class="side-link {% if ep == 'settings.index' %}active{% endif %}" href="{{ url_for('settings.index') }}" title="Settings"><i class="ph ph-gear-six"></i><span class="label">Settings</span></a>
     <div class="menu" data-menu>
       <button class="account" type="button" data-menu-btn aria-haspopup="true" aria-expanded="false">
         <span class="avatar">{{ g.user.username[:1] }}</span>
         <span class="who"><strong>{{ g.user.username }}</strong><span>Student</span></span>
       </button>
       <div class="menu-pop up" role="menu" hidden>
-        <a class="menu-item" role="menuitem" href="{{ url_for('auth.settings') }}"><i class="ph ph-gear-six"></i>Settings</a>
+        <a class="menu-item" role="menuitem" href="{{ url_for('settings.index') }}"><i class="ph ph-gear-six"></i>Settings</a>
         <form method="POST" action="{{ url_for('auth.logout') }}">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <button class="menu-item" role="menuitem" type="submit"><i class="ph ph-sign-out"></i>Log out</button>

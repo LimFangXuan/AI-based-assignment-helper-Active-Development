@@ -22,9 +22,16 @@ COLUMNS = [
     ("task", "based_on_assumption", "BOOLEAN NOT NULL DEFAULT 0"),
     ("task", "content_fingerprint", "VARCHAR(64)"),
     ("report_section", "assumptions_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("user", "has_password", "BOOLEAN NOT NULL DEFAULT 1"),
+    ("user", "email", "VARCHAR(254)"),
+    ("user", "google_sub", "VARCHAR(64)"),
+    ("user", "created_at", "DATETIME"),
 ]
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_project_user_deadline ON project (user_id, deadline)",
+    # 多个 NULL 不算重复，所以没填邮箱 / 没连 Google 的账号不受影响
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_user_email ON user (email)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_user_google_sub ON user (google_sub)",
 ]
 
 

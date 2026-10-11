@@ -52,6 +52,13 @@ CITATION_STYLES = {
     "not_required": "Not required",
 }
 
+# ---------- 账号 ----------
+USERNAME_RANGE = (3, 80)
+PASSWORD_MIN_CHARS = 8
+EMAIL_MAX_CHARS = 254
+LOGIN_MAX_FAILURES = 5        # 同一个用户名 + 地址，10 分钟内最多失败几次
+LOGIN_WINDOW_SECONDS = 600
+
 # ---------- 长度限制 ----------
 NAME_MAX_CHARS = 120
 # 暂定值：Gemini 免费额度的单次请求上限远大于这个数，但正式确定前还要实测（见 spec §4.2）

@@ -20,12 +20,12 @@ def create_app():
     db.init_app(app)
 
     from . import security, template_helpers
-    from .blueprints import auth, calendar, overview, projects
+    from .blueprints import auth, calendar, overview, projects, settings
     from .blueprints.tools import papers, planner, prompt, report, requirements
 
     app.before_request(security.check_csrf)
     template_helpers.register(app)
-    for module in (auth, overview, calendar, projects, requirements, prompt, planner, papers, report):
+    for module in (auth, overview, calendar, projects, settings, requirements, prompt, planner, papers, report):
         app.register_blueprint(module.bp)
 
     # 创建应用时就建表 / 升级：无论用 python run.py、flask run 还是 WSGI 服务器启动，数据库都已经准备好

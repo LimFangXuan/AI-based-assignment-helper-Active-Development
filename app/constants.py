@@ -65,3 +65,18 @@ DUE_SOON_DAYS = 3          # 侧栏 Overview 徽章：逾期或 3 天内到期�
 SIDEBAR_PROJECT_LIMIT = 8  # 侧栏最多列出几个项目
 UPCOMING_DAYS = 6          # “Next 6 days”页面的天数
 CALENDAR_CELL_LIMIT = 2    # 日历每格最多显示几项，其余折叠成 “+N more”
+
+# ---------- AI ----------
+# 描述 + guideline 一次最多发给 AI 的字符数。超过就提示学生精简，而不是让请求失败（spec §4.2）
+MAX_AI_INPUT_CHARS = 26000
+
+# 学生选的类型 → 用哪一份问题库 / 成功做法（app/skills/prompt_generator/ 下的文件名）。
+# 没列出的类型（包括 other）用通用的 general
+TYPE_KNOWLEDGE = {
+    "essay": "report", "report": "report", "literature_review": "research", "case_study": "report",
+    "reflective_writing": "report", "research_proposal": "research", "thesis": "research", "lab_report": "report",
+    "software_development": "programming", "data_analysis_ml": "data_ml",
+    "system_database_design": "programming", "testing_qa": "programming",
+    "presentation": "presentation", "poster": "presentation", "portfolio": "design",
+    "exam_preparation": "learning",
+}

@@ -1,0 +1,133 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% from "components/requirements_parts.html" import aspect_list, conflict_list with context %}
+{% set page_title = tool.name %}
+{% if not check %}
+  {% set page_desc = tool.description %}
+{% elif not check.finished %}
+  {% set page_desc = "Answer what you can. Choose “I don't know” when you're not sure, and the AI will suggest the usual choice." %}
+{% elif check.status == 'complete' %}
+  {% set page_desc = "Every aspect of your task is clear. The next tools build on this." %}
+{% else %}
+  {% set page_desc = "Finished with assumptions. Anything built on an assumption is labelled in the later tools." %}
+{% endif %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block page_class %}narrow{% endblock %}
+
+{% macro start_form(label, primary=True) -%}
+<form method="POST" action="{{ url_for('requirements.start', project_id=project.id) }}" style="margin:0;"
+      data-ai="Reading your description and guideline|Checking which aspects are already clear|Looking for conflicts|Writing the first questions">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn {{ '' if primary else 'secondary' }}" type="submit"><i class="ph ph-sparkle"></i>{{ label }}</button>
+</form>
+{%- endmacro %}
+
+{% block content %}
+<div class="reveal">
+{% if not check %}
+  <section class="card">
+    <h2>Make sure nothing is guessed</h2>
+    <p class="muted" style="margin:8px 0 0;">The AI first reads your description and guideline and marks what is already clear.
+      Then it asks a few short questions about the real gaps only, round by round, until every aspect is clear.
+      You can stop at any time: whatever is still unclear becomes a labelled assumption.</p>
+    <ul class="plain" style="margin:14px 0 18px;">
+      <li>12 aspects: deliverable, audience, scope, required content, guideline constraints, marking, methods, resources, roles, sources, timeline, and what success means.</li>
+      <li>Conflicts with your guideline are pointed out with the exact words they come from.</li>
+    </ul>
+    {{ start_form("Start the check") }}
+  </section>
+
+{% elif not check.finished %}
+  {% set counts = check.counts() %}
+  {% set total = check.aspects | length %}
+  <section class="card">
+    <div class="module-head" style="margin-bottom:10px;">
+      <h2>{{ counts['clear'] + counts['na'] }} of {{ total }} aspects clear</h2>
+      <span class="muted small">{{ counts['unclear'] }} still unclear</span>
+    </div>
+    <div class="bar" style="--pct: {{ ((counts['clear'] + counts['na']) * 100 / total) | round | int }};"><span></span></div>
+  </section>
+
+  {% if check.open_conflicts %}
+  <section class="card">
+    <h2 class="overdue-text"><i class="ph ph-warning-circle"></i>Conflicts to resolve</h2>
+    {{ conflict_list(check.open_conflicts) }}
+  </section>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('requirements.answers', project_id=project.id, check_id=check.id) }}" class="card"
+        data-ai="Reading your answers|Updating the checklist|Working out what is still unclear">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <h2>Questions</h2>
+    <div style="margin-top:6px;">
+    {% for q in check.questions %}
+      {% set i = loop.index0 %}
+      <div class="question">
+        <div class="q">{{ loop.index }}. {{ q.question }}</div>
+        {% if q.why %}<div class="why">Why this matters: {{ q.why }}</div>{% endif %}
+        <div class="options" role="radiogroup" aria-label="{{ q.question }}">
+          {% for opt in q.options %}
+            <label class="option"><input type="radio" name="q{{ i }}" value="{{ opt }}"><span>{{ opt }}</span></label>
+          {% endfor %}
+        </div>
+        <input type="text" name="q{{ i }}_text" maxlength="500" placeholder="Or write your own answer (used instead of the option)" aria-label="Your own answer">
+      </div>
+    {% endfor %}
+    </div>
+    <div class="btn-row" style="margin-top:18px;">
+      <button class="btn" type="submit"><i class="ph ph-paper-plane-tilt"></i>Send answers</button>
+    </div>
+  </form>
+
+  <div class="btn-row" style="justify-content:space-between;margin-top:14px;">
+    <span class="muted small">Unclear aspects left when you finish become assumptions.</span>
+    <form method="POST" action="{{ url_for('requirements.finish_now', project_id=project.id, check_id=check.id) }}" style="margin:0;"
+          data-confirm="The {{ counts['unclear'] }} aspect(s) still unclear will be treated as assumptions, and the later tools will label anything that relies on them."
+          data-confirm-title="Finish with what we have?" data-confirm-ok="Finish now">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn outline" type="submit"><i class="ph ph-flag-checkered"></i>Finish with what we have</button>
+    </form>
+  </div>
+
+  <section class="card" style="margin-top:18px;">
+    <h2>Checklist</h2>
+    {{ aspect_list(check.aspects) }}
+  </section>
+
+{% else %}
+  {% if stale %}
+  <div class="notice"><i class="ph ph-info"></i><span>Details changed since this was created. Update? Run the check again to use your latest description and guideline.</span></div>
+  {% endif %}
+  {% if check.open_conflicts %}
+  <section class="card">
+    <h2 class="overdue-text"><i class="ph ph-warning-circle"></i>Unresolved conflict{{ 's' if check.open_conflicts | length > 1 }}</h2>
+    <p class="muted small" style="margin:6px 0 0;">The Prompt Generator won't build a prompt while a conflict is open. Run the check again and answer it, or edit the project.</p>
+    {{ conflict_list(check.open_conflicts) }}
+  </section>
+  {% endif %}
+
+  <section class="card">
+    <div class="module-head">
+      <h2>{% if check.status == 'complete' %}<i class="ph ph-check-circle" style="color:var(--green)"></i>Requirements confirmed{% else %}<i class="ph ph-flag-checkered"></i>Finished with assumptions{% endif %}</h2>
+    </div>
+    {{ aspect_list(check.aspects, final=True) }}
+  </section>
+
+  {% set decided = check.conflicts | selectattr('status', 'equalto', 'resolved') | list %}
+  {% if decided %}
+  <section class="card">
+    <h2>Decisions on conflicts</h2>
+    {{ conflict_list(decided) }}
+  </section>
+  {% endif %}
+
+  <div class="btn-row" style="margin-top:18px;">
+    <a class="btn" href="{{ url_for('prompt.index', project_id=project.id) }}">Next: Prompt Generator<i class="ph ph-arrow-right"></i></a>
+    {{ start_form("Run the check again", primary=False) }}
+    <a class="btn ghost" href="{{ url_for('projects.edit', project_id=project.id) }}">Edit the project</a>
+  </div>
+{% endif %}
+</div>
+{% endblock %}

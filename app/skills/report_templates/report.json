@@ -1,0 +1,12 @@
+{
+  "name": "Standard academic report",
+  "sections": [
+    {"title": "Introduction", "purpose": "Context, aim of the report and what it covers."},
+    {"title": "Background", "purpose": "Key concepts and existing work the reader needs."},
+    {"title": "Method / Approach", "purpose": "How the work or analysis was carried out."},
+    {"title": "Findings / Results", "purpose": "What was found or produced."},
+    {"title": "Discussion", "purpose": "Interpretation, comparison with sources, limitations."},
+    {"title": "Conclusion", "purpose": "Answer to the aim and key takeaways."},
+    {"title": "Recommendations", "purpose": "Practical next steps, if the task asks for them."}
+  ]
+}

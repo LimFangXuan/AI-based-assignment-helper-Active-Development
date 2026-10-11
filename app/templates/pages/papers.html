@@ -1,7 +1,7 @@
 {% extends "layout.html" %}
 {% from "components/macros.html" import project_line with context %}
 {% set page_title = tool.name %}
-{% set page_desc = "The AI turns your confirmed summary into search terms, OpenAlex returns real papers, and the AI may only pick from those. Code checks every pick against the search results." %}
+{% set page_desc = "The AI turns your confirmed requirements and framework into search terms, OpenAlex returns real papers, and the AI may only pick from those. Code checks every pick against the search results." %}
 {% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
 {% set crumb_icon = tool.icon %}
 {% block under_heading %}{{ project_line(project) }}{% endblock %}
@@ -9,10 +9,11 @@
 {% block content %}
 <div class="reveal">
 {% if hint %}
-  <div class="notice"><i class="ph ph-info"></i><span>{{ hint }} <a class="link" href="{{ url_for('prompt.index', project_id=project.id) }}">Open Prompt Generator</a></span></div>
+  <div class="notice"><i class="ph ph-info"></i><span>{{ hint }} <a class="link" href="{{ url_for('requirements.index', project_id=project.id) }}">Open Requirements Checklist</a></span></div>
 {% else %}
   <section class="card">
     <h2>Search for papers</h2>
+    {% if not has_framework %}<p class="muted small" style="margin:6px 0 0;">Searching from your requirements. Confirming a framework in the Prompt Generator first makes the search more specific.</p>{% endif %}
     <form method="POST" action="{{ url_for('papers.new', project_id=project.id) }}" class="inline-form" style="margin-top:14px;"
           data-ai="Writing English search terms|Searching OpenAlex for real papers|Picking from the results and checking sources">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

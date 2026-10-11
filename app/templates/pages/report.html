@@ -1,0 +1,155 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% set page_title = tool.name %}
+{% set page_desc = tool.description %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block page_class %}narrow{% endblock %}
+
+{% macro outline_form(label, primary=True, confirm=False) -%}
+<form method="POST" action="{{ url_for('report.outline', project_id=project.id) }}" style="margin:0;"
+      data-ai="Reading your requirements and framework|Checking the guideline for a required structure|Writing the outline"
+      {% if confirm %}data-confirm="A new outline starts a new draft. The current draft is kept in the database but no longer shown."
+      data-confirm-title="Start a new outline?" data-confirm-ok="Start new outline"{% endif %}>
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn {{ '' if primary else 'secondary' }}" type="submit"><i class="ph ph-list-numbers"></i>{{ label }}</button>
+</form>
+{%- endmacro %}
+
+{% macro paragraphs(section) -%}
+{% for para in rendered.get(section.id, []) %}
+  <div class="draft-para {% if para.needs_source %}needs-source{% endif %}">
+    {% if para.needs_source or para.assumption %}
+      <div class="para-flags">
+        {% if para.needs_source %}<span class="tag soon"><i class="ph ph-link-break"></i>Needs source</span>{% endif %}
+        {% if para.assumption %}<span class="tag overdue">Based on an assumption</span>{% endif %}
+      </div>
+    {% endif %}
+    <p>{{ para.text }}</p>
+  </div>
+{% endfor %}
+{%- endmacro %}
+
+{% block content %}
+<div class="reveal">
+{% if not check %}
+  <section class="card empty">
+    <i class="ph ph-list-checks"></i>
+    <strong>Finish the Requirements Checklist first</strong>
+    The outline and every section are built from your confirmed requirements.
+    <div class="btn-row"><a class="btn" href="{{ url_for('requirements.index', project_id=project.id) }}">Open Requirements Checklist<i class="ph ph-arrow-right"></i></a></div>
+  </section>
+
+{% elif not draft %}
+  <section class="card">
+    <h2>Start with the outline</h2>
+    <p class="muted" style="margin:8px 0 12px;">If your guideline prescribes a structure, the outline follows it. Otherwise it adapts the
+      <strong>{{ template_name }}</strong> template to your task. Then the sections are written one at a time, and you approve each before the next unlocks.</p>
+    <ul class="plain" style="margin:0 0 16px;">
+      <li>{% if framework %}Uses your confirmed framework.{% else %}No confirmed framework yet: the <a class="link" href="{{ url_for('prompt.index', project_id=project.id) }}">Prompt Generator</a> makes the draft more specific.{% endif %}</li>
+      <li>{{ papers | length }} paper{{ 's' if papers | length != 1 }} from the <a class="link" href="{{ url_for('papers.index', project_id=project.id) }}">Paper Finder</a> can be cited. Paragraphs without a source are flagged.</li>
+    </ul>
+    {{ outline_form("Generate outline") }}
+  </section>
+
+{% else %}
+  {% if stale %}
+  <div class="notice"><i class="ph ph-info"></i><span>Details changed since this was created. Update? Start a new outline to use your latest description and guideline.</span></div>
+  {% endif %}
+  <div class="notice"><i class="ph ph-pen-nib"></i><span>This is a draft to rework in your own words. Check every claim against the papers, and follow your institution's rules on AI use.</span></div>
+
+  <section class="card">
+    <div class="module-head">
+      <h2>Outline</h2>
+      <span class="tag">{{ 'From your guideline' if draft.outline.source == 'guideline' else template_name }}</span>
+    </div>
+    <p class="muted small" style="margin:-6px 0 0;">Citation style: {{ CITATION_STYLES.get(style) }}{% if project.citation_style not in ['apa7', 'harvard', 'ieee', 'mla', 'chicago'] %} (none chosen, so APA 7 is used; check it against your guideline){% endif %}.
+      {{ papers | length }} paper{{ 's' if papers | length != 1 }} available to cite.</p>
+  </section>
+
+  {% for s in draft.sections %}
+    {% set i = loop.index0 %}
+    {% set info = draft.outline.sections[i] if i < draft.outline.sections | length else {} %}
+    {% set locked = i > current %}
+    <section class="card report-section {{ s.status }} {% if locked %}locked{% endif %}" id="s{{ s.id }}">
+      <div class="module-head" style="margin-bottom:8px;">
+        <h2><span class="sec-num">{{ i + 1 }}</span>{{ s.title }}</h2>
+        {% if s.status == 'approved' %}<span class="tag ok"><i class="ph ph-check"></i>Approved</span>
+        {% elif locked %}<span class="tag"><i class="ph ph-lock-simple"></i>Locked</span>
+        {% elif s.status == 'draft' %}<span class="tag soon">Draft</span>
+        {% else %}<span class="tag dark">Up next</span>{% endif %}
+      </div>
+      {% if info.purpose %}<p class="muted small" style="margin:0 0 6px;">{{ info.purpose }}{% if info.target_words %} About {{ info.target_words }} words.{% endif %}</p>{% endif %}
+
+      {% if locked %}
+        <p class="muted small" style="margin:0;">Approve the section above to unlock this one.</p>
+
+      {% elif s.status == 'approved' %}
+        <details class="approved-body"><summary>Show text</summary>{{ paragraphs(s) }}</details>
+        <form method="POST" action="{{ url_for('report.reopen', project_id=project.id, draft_id=draft.id, section_id=s.id) }}" style="margin-top:10px;">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="btn ghost small" type="submit"><i class="ph ph-arrow-counter-clockwise"></i>Reopen to edit</button>
+        </form>
+
+      {% elif s.status == 'pending' %}
+        {% if info.key_points %}<ul class="plain small">{% for k in info.key_points %}<li>{{ k }}</li>{% endfor %}</ul>{% endif %}
+        <form method="POST" action="{{ url_for('report.write', project_id=project.id, draft_id=draft.id, section_id=s.id) }}"
+              data-ai="Reading the outline and your approved sections|Writing this section|Linking claims to your papers">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label for="notes-{{ s.id }}">Your ideas for this section <span class="opt">(optional)</span></label>
+          <textarea id="notes-{{ s.id }}" name="notes" rows="2" maxlength="1000" placeholder="Points you want made, examples from your own work, things to avoid..."></textarea>
+          <div class="btn-row" style="margin-top:10px;"><button class="btn" type="submit"><i class="ph ph-sparkle"></i>Write this section</button></div>
+        </form>
+
+      {% else %}
+        {{ paragraphs(s) }}
+        {% if s.assumptions %}<div class="notice" style="margin-top:10px;"><i class="ph ph-warning"></i><span>Relies on assumptions: {{ s.assumptions | join('; ') }}</span></div>{% endif %}
+        <div class="btn-row" style="margin-top:14px;">
+          <form method="POST" action="{{ url_for('report.approve', project_id=project.id, draft_id=draft.id, section_id=s.id) }}" style="margin:0;">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button class="btn" type="submit"><i class="ph ph-check-circle"></i>Approve section</button>
+          </form>
+        </div>
+        <details class="section-tools">
+          <summary>Add ideas and rewrite</summary>
+          <form method="POST" action="{{ url_for('report.write', project_id=project.id, draft_id=draft.id, section_id=s.id) }}"
+                data-ai="Reading your notes|Rewriting this section">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <textarea name="notes" rows="3" maxlength="1000" aria-label="Your ideas" placeholder="What should change? e.g. shorter, add the survey results, compare with the second paper.">{{ s.student_notes }}</textarea>
+            <div class="btn-row" style="margin-top:8px;"><button class="btn secondary small" type="submit"><i class="ph ph-arrows-clockwise"></i>Rewrite with these ideas</button></div>
+          </form>
+        </details>
+        <details class="section-tools">
+          <summary>Edit the text yourself</summary>
+          <form method="POST" action="{{ url_for('report.save', project_id=project.id, draft_id=draft.id, section_id=s.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <p class="field-hint">Cite a paper by typing its marker, e.g. [P{{ papers[0].id if papers else 1 }}]. Leave a blank line between paragraphs.</p>
+            <textarea name="content" rows="10" aria-label="Section text">{{ s.content }}</textarea>
+            {% if papers %}<p class="field-hint" style="margin-top:6px;">Markers: {% for p in papers %}[P{{ p.id }}] {{ (p.authors or 'Anon.').split(',')[0] }} {{ p.year or '' }}{{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
+            <div class="btn-row" style="margin-top:8px;"><button class="btn secondary small" type="submit">Save text</button></div>
+          </form>
+        </details>
+      {% endif %}
+    </section>
+  {% endfor %}
+
+  {% if references %}
+  <section class="card">
+    <h2>References</h2>
+    <ul class="ref-list">{% for r in references %}<li>{{ r }}</li>{% endfor %}</ul>
+    <p class="muted small" style="margin:8px 0 0;">Built from OpenAlex metadata, not by the AI. Check them against the original papers.</p>
+  </section>
+  {% endif %}
+
+  {% if export %}
+  <section class="card" id="export">
+    <div class="module-head"><h2>Approved sections</h2><button class="btn small" type="button" data-copy="export-text"><i class="ph ph-copy"></i>Copy</button></div>
+    <textarea class="prompt" id="export-text" readonly rows="10" aria-label="Approved text">{{ export }}</textarea>
+  </section>
+  {% endif %}
+
+  <div class="btn-row" style="margin-top:18px;">{{ outline_form("Start a new outline", primary=False, confirm=True) }}</div>
+{% endif %}
+</div>
+{% endblock %}

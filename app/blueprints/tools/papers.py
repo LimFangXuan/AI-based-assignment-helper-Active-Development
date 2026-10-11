@@ -1,7 +1,7 @@
 """Paper Finder：固定流程的 RAG 流水线（AI 生成检索词 → OpenAlex → AI 只能从候选中挑选 → 代码校验 ID → 存库）。
 
 是否显示由学生选的项目类型决定（tools_registry 的 hidden_for_types），不再由 AI 判断。
-现在的输入仍是旧 Prompt Generator 的已确认摘要；阶段 5 会改成 Requirements / framework。
+输入是最新一次已结束的 Requirements Checklist，以及（如果有）已确认的 framework（spec §7.4）。
 """
 import json
 
@@ -10,48 +10,47 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 from ...extensions import db
 from ...models import Paper, PaperSearch
 from ...security import login_required
-from ...services import openalex_client, prompt_builder
+from ...services import openalex_client, paper_finder
+from ...services.requirements_checker import context_block
 from ...services.ai_client import AIServiceError
-from . import get_tool_project
+from . import confirmed_framework, finished_requirements, get_tool_project
 
 bp = Blueprint("papers", __name__, url_prefix="/projects/<int:project_id>/tools/papers")
 
-NEEDS_PROMPT_HINT = "Finish and confirm the Prompt Generator first, so the search knows what to look for."
-
-
-def latest_confirmed_session(project):
-    """检索依据：最近一次已确认（已生成 prompt）的摘要。prompt_sessions 已按时间倒序。"""
-    return next((ps for ps in project.prompt_sessions if ps.final_prompt and ps.summary), None)
+NEEDS_REQUIREMENTS_HINT = "Finish the Requirements Checklist first, so the search knows what your topic is."
 
 
 @bp.route("")
 @login_required
 def index(project_id):
     project, tool = get_tool_project(project_id, "papers")
-    hint = None if latest_confirmed_session(project) else NEEDS_PROMPT_HINT
+    hint = None if finished_requirements(project) else NEEDS_REQUIREMENTS_HINT
     return render_template("pages/papers.html", project=project, tool=tool, hint=hint,
-                           min_papers=prompt_builder.MIN_PAPERS, max_papers=prompt_builder.MAX_PAPERS)
+                           has_framework=confirmed_framework(project) is not None,
+                           min_papers=paper_finder.MIN_PAPERS, max_papers=paper_finder.MAX_PAPERS)
 
 
 @bp.route("/new", methods=["POST"])
 @login_required
 def new(project_id):
     project, _ = get_tool_project(project_id, "papers")
-    ps = latest_confirmed_session(project)
-    if ps is None:
-        flash(NEEDS_PROMPT_HINT, "error")
+    check = finished_requirements(project)
+    if check is None:
+        flash(NEEDS_REQUIREMENTS_HINT, "error")
         return redirect(url_for("papers.index", project_id=project.id))
+    ps = confirmed_framework(project)
+    context = paper_finder.search_context(context_block(check.aspects, check.conflicts), ps.framework if ps else None)
 
     try:
         count = int(request.form.get("count", 5))
     except ValueError:
         count = 5
-    count = max(prompt_builder.MIN_PAPERS, min(prompt_builder.MAX_PAPERS, count))
+    count = max(paper_finder.MIN_PAPERS, min(paper_finder.MAX_PAPERS, count))
     oa_only = request.form.get("oa_only") == "1"
     target = min(30, max(15, count * 3))  # 候选数量：约为要推荐篇数的 3 倍，15 到 30 篇
 
     try:
-        queries = prompt_builder.paper_queries(project, ps.summary)           # 1. AI：生成检索词
+        queries = paper_finder.paper_queries(project, context)           # 1. AI：生成检索词
         per_query = min(25, -(-target // len(queries)))                       # 向上取整
         found = {}
         for query in queries:                                                 # 2. 代码：检索并去重
@@ -59,16 +58,16 @@ def new(project_id):
                 found.setdefault(work["openalex_id"], work)
         candidates = list(found.values())[:target]
         if not candidates:
-            flash("No papers found. Add more detail to the project and confirm a new prompt, "
-                  "or untick “Open access only” and try again.", "error")
+            flash("No papers found. Untick “Open access only”, or add more detail about the topic "
+                  "and run the Requirements Checklist again.", "error")
             return redirect(url_for("papers.index", project_id=project.id))
-        selected = prompt_builder.select_papers(project, ps.summary, candidates, count)  # 3. AI 挑选 + 代码校验
+        selected = paper_finder.select_papers(project, context, candidates, count)  # 3. AI 挑选 + 代码校验
     except (AIServiceError, openalex_client.OpenAlexError) as e:
         flash(e.user_message, "error")  # 任何一步失败：只提示，不写入数据库
         return redirect(url_for("papers.index", project_id=project.id))
 
     by_id = {c["openalex_id"]: c for c in candidates}
-    search = PaperSearch(project_id=project.id, session_id=ps.id, requested_count=count, oa_only=oa_only,
+    search = PaperSearch(project_id=project.id, session_id=ps.id if ps else None, requested_count=count, oa_only=oa_only,
                          queries_json=json.dumps(queries, ensure_ascii=False), candidate_count=len(candidates))
     for item in selected:
         c = by_id[item["openalex_id"]]

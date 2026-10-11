@@ -17,6 +17,11 @@ COLUMNS = [
     ("project", "citation_style", "VARCHAR(30)"),
     ("project", "guideline", "TEXT NOT NULL DEFAULT ''"),
     ("task", "detail", "TEXT"),
+    ("requirements_check", "conflicts_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("requirements_check", "questions_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ("task", "based_on_assumption", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("task", "content_fingerprint", "VARCHAR(64)"),
+    ("report_section", "assumptions_json", "TEXT NOT NULL DEFAULT '[]'"),
 ]
 INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_project_user_deadline ON project (user_id, deadline)",

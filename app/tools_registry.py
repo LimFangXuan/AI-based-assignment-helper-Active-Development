@@ -20,7 +20,7 @@ class Tool:
 TOOLS = [
     Tool("requirements", "Requirements Checklist",
          "Answer questions until every aspect of your task is clear.",
-         "ph-list-checks", "requirements.index", implemented=False),
+         "ph-list-checks", "requirements.index", implemented=True),
     Tool("prompt", "Prompt Generator",
          "Turn your confirmed requirements into a full project framework and a ready-to-use AI prompt.",
          "ph-chat-centered-text", "prompt.index", implemented=True),
@@ -33,7 +33,7 @@ TOOLS = [
          hidden_for_types=frozenset({"portfolio", "exam_preparation"})),
     Tool("report", "Report Drafter",
          "Build a draft section by section from your framework and chosen papers.",
-         "ph-file-text", "report.index", implemented=False,
+         "ph-file-text", "report.index", implemented=True,
          hidden_for_types=frozenset({"portfolio", "exam_preparation"})),
 ]
 TOOLS_BY_SLUG = {t.slug: t for t in TOOLS}

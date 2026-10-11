@@ -1,0 +1,38 @@
+{# 需求清单的两个部件：方面列表、冲突列表。Requirements 页和 Prompt Generator 页共用 #}
+
+{# 每个方面一行：名字、状态标签、已知内容或假设 #}
+{% macro aspect_list(aspects, final=False) -%}
+<ul class="aspect-list">
+  {% for a in aspects %}
+    {% if a.state == 'clear' and a.source == 'recommended' %}{% set label, tone = 'Recommended', 'soon' %}
+    {% elif a.state == 'clear' %}{% set label, tone = 'Confirmed', 'ok' %}
+    {% elif a.state == 'na' %}{% set label, tone = 'N/A', '' %}
+    {% elif a.state == 'assumed' %}{% set label, tone = 'Assumed', 'overdue' %}
+    {% else %}{% set label, tone = 'Unclear', '' %}{% endif %}
+    <li class="aspect {{ a.state }}">
+      <span class="tag {{ tone }}">{{ label }}</span>
+      <div class="aspect-body">
+        <strong>{{ a.name }}</strong>
+        {% if a.state == 'assumed' %}
+          <div class="muted small">Assumed: {{ a.assumption }}</div>
+        {% elif a.summary %}
+          <div class="muted small">{{ a.summary }}</div>
+        {% elif not final %}
+          <div class="muted small">{{ a.hint }}</div>
+        {% endif %}
+      </div>
+    </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{% macro conflict_list(conflicts) -%}
+{% for c in conflicts %}
+  <div class="conflict">
+    <strong>{{ c.issue }}</strong>
+    <div class="evidence">From your material: “{{ c.evidence }}”</div>
+    {% if c.status == 'resolved' %}<div>Decided: {{ c.resolution }}</div>
+    {% elif c.options %}<div class="small">Possible ways forward: {{ c.options | join('; ') }}</div>{% endif %}
+  </div>
+{% endfor %}
+{%- endmacro %}

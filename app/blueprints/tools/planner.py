@@ -1,6 +1,7 @@
-"""Task Planner：项目的步骤列表（可手动增删改、打勾、拖拽排序）+ AI 拆解草稿。
+"""Task Planner：项目的步骤列表（可手动增删改、打勾、拖拽排序）+ AI 拆解草稿（spec §7.3）。
 
-现在 AI 根据描述 + guideline + 截止日期拆解；阶段 5 会改成以 Prompt Generator 的 framework 为输入。
+AI 拆解的输入是已确认的 framework + 截止日期 + 今天的日期。草稿不存库，学生改完才保存；
+保存时可以选择替换之前 AI 规划、还没完成的任务，或者追加在后面。手动添加的任务和已完成的任务不会被替换。
 """
 from datetime import date, datetime
 
@@ -8,11 +9,11 @@ from flask import Blueprint, flash, jsonify, redirect, render_template, request,
 
 from ...constants import STATUS_LABELS, TASK_MINUTES_RANGE, TASK_TITLE_MAX_CHARS
 from ...extensions import db
-from ...models import Task
+from ...models import RequirementsCheck, Task
 from ...security import get_own_child, login_required, safe_next
 from ...services import task_planner
 from ...services.ai_client import AIServiceError
-from . import get_tool_project
+from . import confirmed_framework, get_tool_project
 
 bp = Blueprint("planner", __name__, url_prefix="/projects/<int:project_id>/tools/planner")
 
@@ -102,7 +103,10 @@ def next_position(project):
 @login_required
 def index(project_id):
     project, tool = get_tool_project(project_id, "planner")
-    return render_template("pages/planner.html", project=project, tool=tool)
+    planned = [t for t in project.tasks if t.content_fingerprint and not t.done]
+    stale = any(t.content_fingerprint != project.fingerprint for t in planned)
+    return render_template("pages/planner.html", project=project, tool=tool, stale=stale,
+                           framework_session=confirmed_framework(project))
 
 
 @bp.route("/tasks", methods=["POST"])
@@ -179,46 +183,73 @@ def task_reorder(project_id):
     return task_response(project)
 
 
+def planning_inputs(project):
+    """AI 拆解需要的输入：已确认的 framework，以及它所依据的那次需求。没有就返回 None。"""
+    ps = confirmed_framework(project)
+    if ps is None:
+        return None
+    check = db.session.get(RequirementsCheck, ps.requirements_check_id) if ps.requirements_check_id else None
+    return ps, (check.aspects if check else []), (check.conflicts if check else [])
+
+
 @bp.route("/draft", methods=["POST"])
 @login_required
 def draft(project_id):
-    """AI 拆出步骤草稿。草稿不存库：学生改完点“保存”才写入。"""
+    """AI 按天拆出任务草稿（1 次 AI）。草稿不存库：学生改完点“保存”才写入。"""
     project, tool = get_tool_project(project_id, "planner")
-    if not project.description:
-        flash("Add a description to the project first, so the AI knows what to plan.", "error")
+    inputs = planning_inputs(project)
+    if inputs is None:
+        flash("Confirm a framework in the Prompt Generator first. The plan is built from it.", "error")
         return redirect(default_page(project))
+    ps, aspects, conflicts = inputs
     try:
-        steps = task_planner.generate_plan(project, date.today())
+        plan = task_planner.generate_plan(project, date.today(), aspects, conflicts, ps.framework)
+    except task_planner.DeadlinePassed:
+        flash("The deadline has already passed, so there is no time left to plan. "
+              "Update the deadline if you have an extension.", "error")
+        return redirect(default_page(project))
     except AIServiceError as e:
         flash(e.user_message, "error")
         return redirect(default_page(project))
-    return render_template("pages/plan_draft.html", project=project, tool=tool, steps=steps)
+    has_planned = any(t.content_fingerprint and not t.done for t in project.tasks)
+    return render_template("pages/plan_draft.html", project=project, tool=tool, plan=plan, has_planned=has_planned)
 
 
 @bp.route("/save", methods=["POST"])
 @login_required
 def save(project_id):
     project, _ = get_tool_project(project_id, "planner")
-    titles = request.form.getlist("title")
-    dues = request.form.getlist("due_date")
-    minutes = request.form.getlist("minutes")
-    position = next_position(project)
-    added = 0
-    for i, title in enumerate(titles[:task_planner.MAX_PLAN_STEPS * 2]):
+    rows = zip(request.form.getlist("title"), request.form.getlist("due_date"), request.form.getlist("minutes"),
+               request.form.getlist("detail"), request.form.getlist("assumed"))
+    new_tasks = []
+    for title, due_raw, minutes_raw, detail, assumed in list(rows)[:task_planner.MAX_PLAN_STEPS * 2]:
         title = title.strip()[:TASK_TITLE_MAX_CHARS]
         if not title:
             continue  # 学生清空了内容的行直接跳过
-        due, ok = parse_date(dues[i] if i < len(dues) else "")
-        db.session.add(Task(project_id=project.id, title=title, due_date=due if ok else None,
-                            minutes=parse_minutes(minutes[i] if i < len(minutes) else None),
-                            position=position + added))
-        added += 1
-    if not added:
+        due, ok = parse_date(due_raw)
+        new_tasks.append(Task(project_id=project.id, title=title, due_date=due if ok else None,
+                              minutes=parse_minutes(minutes_raw), detail=detail.strip()[:400] or None,
+                              based_on_assumption=assumed == "1", content_fingerprint=project.fingerprint))
+    if not new_tasks:
         flash("There are no tasks to save.", "error")
         return redirect(default_page(project))
+    replaced = 0
+    if request.form.get("mode") == "replace":
+        for t in [t for t in project.tasks if t.content_fingerprint and not t.done]:
+            db.session.delete(t)  # 只替换之前 AI 规划、还没完成的任务
+            replaced += 1
+        db.session.flush()
+        db.session.refresh(project)
+    position = next_position(project)
+    for i, task in enumerate(new_tasks):
+        task.position = position + i
+        db.session.add(task)
     db.session.flush()
     db.session.refresh(project)
     sync_status(project)
     db.session.commit()
-    flash(f"Added {added} task{'s' if added != 1 else ''}.", "success")
+    message = f"Added {len(new_tasks)} task{'s' if len(new_tasks) != 1 else ''}."
+    if replaced:
+        message += f" Replaced {replaced} earlier planned task{'s' if replaced != 1 else ''}."
+    flash(message, "success")
     return redirect(default_page(project))

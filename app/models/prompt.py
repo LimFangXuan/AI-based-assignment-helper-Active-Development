@@ -2,14 +2,13 @@ import json
 from datetime import datetime
 
 from ..extensions import db
-from ..services import prompt_builder
 
 
 class PromptSession(db.Model):
     """一次"生成 prompt"的完整记录。
 
     旧流程：AI 提的问题 → 学生的回答 → 摘要 → 最终 prompt。
-    新流程（阶段 5）：以 RequirementsCheck 为输入，直接生成 framework_json 和最终 prompt，没有单独的提问阶段。
+    新流程：以 RequirementsCheck 为输入，直接生成 framework_json 和最终 prompt，没有单独的提问阶段。
     旧列一律保留，旧记录仍能读取。
     """
 
@@ -44,5 +43,11 @@ class PromptSession(db.Model):
         return json.loads(self.diagnosis_json) if self.diagnosis_json else None
 
     @property
-    def blocked(self):
-        return prompt_builder.is_blocked(self.summary)
+    def framework(self):
+        return json.loads(self.framework_json) if self.framework_json else None
+
+    @property
+    def inputs(self):
+        """新流程里 answers_json 存学生的修改意见和已做的决定：{"notes": [...], "decisions": {问题: {...}}}。"""
+        data = json.loads(self.answers_json) if self.answers_json else {}
+        return data if isinstance(data, dict) else {}

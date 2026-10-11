@@ -88,20 +88,35 @@ def edit(project_id):
 
 
 def tool_cards(project):
-    """每张工具卡片的状态文字和提示。前面的工具没完成时给后面的卡片一个温和提示，但不锁住。"""
-    confirmed = next((ps for ps in project.prompt_sessions if ps.final_prompt), None)
+    """每张工具卡片的状态和提示。前面的工具没完成时给后面的卡片一个温和提示，但不锁住（spec §5.5）。"""
+    from .tools import confirmed_framework, finished_requirements, framework_sessions  # 避免循环导入
+
+    check = project.requirements_checks[0] if project.requirements_checks else None
+    requirements_done = finished_requirements(project) is not None
+    framework = confirmed_framework(project)
     done, total, _ = project.progress
+    papers = sum(len(s.papers) for s in project.paper_searches)
+    draft = project.report_drafts[0] if project.report_drafts else None
+    approved = sum(1 for s in draft.sections if s.status == "approved") if draft else 0
+
     states = {
-        "prompt": ("done", f"{sum(1 for ps in project.prompt_sessions if ps.final_prompt)} prompt(s) ready")
-        if confirmed else ("todo", "Not started" if not project.prompt_sessions else "In progress"),
+        "requirements": ("todo", "Not started") if check is None else
+        ("active", "In progress") if not check.finished else
+        ("done", "Confirmed" if check.status == "complete" else "Finished with assumptions"),
+        "prompt": ("done", "Prompt ready") if framework else
+        ("active", "Framework waiting for your review") if framework_sessions(project) else ("todo", "Not started"),
         "planner": ("done" if total and done == total else ("todo" if not total else "active"),
                     f"{done} / {total} tasks done" if total else "No tasks yet"),
-        "papers": ("done", f"{len(project.paper_searches)} search(es)") if project.paper_searches
-        else ("todo", "No papers yet"),
+        "papers": ("done", f"{papers} paper{'s' if papers != 1 else ''} found") if papers else ("todo", "No papers yet"),
+        "report": ("todo", "Not started") if draft is None else
+        ("done" if approved == len(draft.sections) else "active", f"{approved} / {len(draft.sections)} sections approved"),
     }
     hints = {
-        "planner": None if confirmed else "Works best after the Prompt Generator, so tasks follow your framework.",
-        "papers": None if confirmed else "Needs a confirmed prompt first: it searches from your confirmed summary.",
+        "prompt": None if requirements_done else "Needs the Requirements Checklist first.",
+        "planner": None if framework else "AI planning needs a confirmed framework from the Prompt Generator.",
+        "papers": None if requirements_done else "Needs the Requirements Checklist first.",
+        "report": "Works best after the Paper Finder, so paragraphs can cite real papers."
+        if requirements_done and not papers else (None if requirements_done else "Needs the Requirements Checklist first."),
     }
     cards = []
     for tool in tools_for(project):

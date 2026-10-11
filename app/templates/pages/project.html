@@ -68,7 +68,7 @@
           {% if c.state != 'soon' %}
             <div class="state">{% if c.state == 'done' %}<i class="ph ph-check-circle" style="color:var(--green)"></i>{% elif c.state == 'active' %}<i class="ph ph-circle-half"></i>{% else %}<i class="ph ph-circle-dashed"></i>{% endif %}{{ c.meta }}</div>
           {% endif %}
-          {% if c.hint and c.state == 'todo' %}<div class="hint"><i class="ph ph-info"></i>{{ c.hint }}</div>{% endif %}
+          {% if c.hint and c.state != 'done' %}<div class="hint"><i class="ph ph-info"></i>{{ c.hint }}</div>{% endif %}
         </div>
         <span class="btn secondary small go">{{ 'Preview' if c.state == 'soon' else 'Open' }}</span>
       </a>

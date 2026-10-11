@@ -1,0 +1,14 @@
+[
+  {"key": "deliverable", "name": "Deliverable", "hint": "What exactly is handed in: format, files, length, parts (report, code, slides, video...)."},
+  {"key": "audience", "name": "Audience", "hint": "Who reads, uses or marks the work, and what they already know."},
+  {"key": "topic_scope", "name": "Topic and scope", "hint": "The topic or problem, and what is in and out of scope."},
+  {"key": "required_content", "name": "Required content", "hint": "Sections, features or elements that must be included."},
+  {"key": "guideline_constraints", "name": "Constraints from the guideline", "hint": "Word or page limits, format rules, allowed or banned methods, tools or sources."},
+  {"key": "evaluation_criteria", "name": "Evaluation criteria", "hint": "How the work is marked and which parts carry the most weight."},
+  {"key": "methods_tools", "name": "Methods or tools", "hint": "The approach, methods, languages, frameworks or software to use."},
+  {"key": "data_resources", "name": "Data or resources available", "hint": "Datasets, materials, existing work, access or equipment the student has."},
+  {"key": "roles", "name": "Roles", "hint": "Group size, who does which part, and how the parts come together.", "group_only": true},
+  {"key": "citation_sources", "name": "Citation and sources", "hint": "Citation style, number and kind of sources required (journals, recent years...)."},
+  {"key": "timeline_concerns", "name": "Timeline concerns", "hint": "Milestones, interim submissions, and how much time the student can actually spend."},
+  {"key": "success_definition", "name": "Success definition", "hint": "What the student is aiming for (pass, high mark, portfolio piece) and what done looks like."}
+]

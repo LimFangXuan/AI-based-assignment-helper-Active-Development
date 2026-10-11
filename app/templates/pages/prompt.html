@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% from "components/requirements_parts.html" import conflict_list with context %}
+{% set page_title = tool.name %}
+{% set page_desc = tool.description %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block page_class %}narrow{% endblock %}
+
+{% macro generate_form(label, primary=True) -%}
+<form method="POST" action="{{ url_for('prompt.generate', project_id=project.id) }}" style="margin:0;"
+      data-ai="Reading your confirmed requirements|Planning the phases of the project|Checking what needs your decision">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn {{ '' if primary else 'secondary' }}" type="submit"><i class="ph ph-sparkle"></i>{{ label }}</button>
+</form>
+{%- endmacro %}
+
+{% block content %}
+<div class="reveal">
+{% if not check %}
+  <section class="card empty">
+    <i class="ph ph-list-checks"></i>
+    <strong>Finish the Requirements Checklist first</strong>
+    The framework and prompt are built from your confirmed requirements, so nothing important is guessed.
+    <div class="btn-row"><a class="btn" href="{{ url_for('requirements.index', project_id=project.id) }}">Open Requirements Checklist<i class="ph ph-arrow-right"></i></a></div>
+  </section>
+
+{% elif check.open_conflicts %}
+  <section class="card">
+    <h2 class="overdue-text"><i class="ph ph-warning-circle"></i>A conflict is still unresolved</h2>
+    <p class="muted" style="margin:8px 0 0;">So no framework or prompt is built. A prompt that hides the conflict would push the AI further in a direction that may lose you marks.</p>
+    {{ conflict_list(check.open_conflicts) }}
+    <div class="btn-row" style="margin-top:14px;">
+      <a class="btn" href="{{ url_for('requirements.index', project_id=project.id) }}">Resolve it in the Requirements Checklist</a>
+      <a class="btn ghost" href="{{ url_for('projects.edit', project_id=project.id) }}">Edit the project</a>
+    </div>
+  </section>
+
+{% elif not ps %}
+  {% set counts = check.counts() %}
+  <section class="card">
+    <h2>Build the project framework</h2>
+    <p class="muted" style="margin:8px 0 14px;">From your requirements ({{ counts['clear'] }} confirmed{% if counts['assumed'] %}, {{ counts['assumed'] }} assumed{% endif %}),
+      the AI plans how to do the project: phases, methods and deliverables. You review it, then get a prompt to paste into any AI chat.</p>
+    {{ generate_form("Build framework") }}
+  </section>
+
+{% else %}
+  {% set fw = ps.framework %}
+  {% if stale %}
+  <div class="notice"><i class="ph ph-info"></i><span>Details changed since this was created. Update? Build a new framework to use your latest project details and requirements.</span></div>
+  {% endif %}
+
+  {% if ps.final_prompt %}
+    <section class="card">
+      <div class="module-head">
+        <h2><i class="ph ph-check-circle" style="color:var(--green)"></i>Your prompt is ready</h2>
+        <button class="btn small" type="button" data-copy="final-prompt"><i class="ph ph-copy"></i>Copy</button>
+      </div>
+      <p class="muted small" style="margin:0 0 10px;">Paste it into any AI chat. It works one step at a time and waits for you before moving on. Check the [ASSUMED] items first.</p>
+      <textarea class="prompt" id="final-prompt" readonly aria-label="Generated prompt">{{ ps.final_prompt }}</textarea>
+    </section>
+    <div style="margin-top:18px;">{% include "components/framework.html" %}</div>
+    <div class="btn-row" style="margin-top:18px;">
+      <a class="btn" href="{{ url_for('planner.index', project_id=project.id) }}">Next: Task Planner<i class="ph ph-arrow-right"></i></a>
+      {{ generate_form("Build a new framework", primary=False) }}
+    </div>
+
+  {% else %}
+    {% if fw.decisions_needed %}
+    <form method="POST" action="{{ url_for('prompt.decide', project_id=project.id, session_id=ps.id) }}" class="card"
+          data-ai="Applying your decision|Updating the framework">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <h2><i class="ph ph-signpost"></i>Needs your decision</h2>
+      {% for d in fw.decisions_needed %}
+        <div class="question">
+          <div class="q">{{ d.question }}</div>
+          <div class="decision-options">
+            {% for o in d.options %}
+              <label class="decision"><input type="radio" name="{{ d.id }}" value="{{ o.label }}" required>
+                <span><strong>{{ o.label }}</strong>{% if o.effect %}<span class="muted small">{{ o.effect }}</span>{% endif %}</span></label>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+      <div class="btn-row" style="margin-top:16px;"><button class="btn" type="submit">Use these and update the framework</button></div>
+    </form>
+    {% endif %}
+
+    <div style="margin-top:18px;">{% include "components/framework.html" %}</div>
+
+    <section class="card">
+      <h2>Anything to change?</h2>
+      <form method="POST" action="{{ url_for('prompt.revise', project_id=project.id, session_id=ps.id) }}" style="margin-top:10px;"
+            data-ai="Applying your notes|Rewriting the framework">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="notes" class="sr-only">Your notes</label>
+        <textarea id="notes" name="notes" rows="3" maxlength="1000" data-count
+                  placeholder="e.g. Put the literature review before the survey; we must use Python, not R; add a phase for the presentation."></textarea>
+        <div class="btn-row" style="margin-top:10px;"><button class="btn secondary" type="submit"><i class="ph ph-arrows-clockwise"></i>Update with these notes</button></div>
+      </form>
+    </section>
+
+    <form method="POST" action="{{ url_for('prompt.confirm', project_id=project.id, session_id=ps.id) }}" class="btn-row" style="margin-top:18px;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn" type="submit" {% if fw.decisions_needed %}disabled title="Make the decisions above first"{% endif %}>
+        <i class="ph ph-check-circle"></i>Confirm framework and build the prompt</button>
+      {% if fw.decisions_needed %}<span class="muted small">Make the decisions above first.</span>{% endif %}
+    </form>
+  {% endif %}
+{% endif %}
+</div>
+{% endblock %}

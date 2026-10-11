@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from ..extensions import db
-from ..services import prompt_builder
+from ..services.citations import format_citation
 
 
 class PaperSearch(db.Model):
@@ -55,4 +55,4 @@ class Paper(db.Model):
 
     @property
     def citation(self):
-        return prompt_builder.format_citation(self)
+        return format_citation(self)

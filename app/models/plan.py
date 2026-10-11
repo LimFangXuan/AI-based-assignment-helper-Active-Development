@@ -9,7 +9,9 @@ class Task(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=False)
     title = db.Column(db.String(200), nullable=False)
-    detail = db.Column(db.Text)      # 预留：Task Planner 以后可以写更详细的说明
+    detail = db.Column(db.Text)      # Task Planner 写的“做完是什么样子”
+    based_on_assumption = db.Column(db.Boolean, nullable=False, default=False)  # 依赖还没确认的需求
+    content_fingerprint = db.Column(db.String(64))  # AI 规划的任务：生成时的描述 + guideline 指纹；手动添加的为空
     due_date = db.Column(db.Date)
     minutes = db.Column(db.Integer)  # 预计用时（分钟），可以为空
     done = db.Column(db.Boolean, nullable=False, default=False)

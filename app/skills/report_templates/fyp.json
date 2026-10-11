@@ -1,0 +1,14 @@
+{
+  "name": "Final year project (FYP) format",
+  "sections": [
+    {"title": "Background", "purpose": "The context of the problem and why it matters."},
+    {"title": "Problem Statement", "purpose": "The specific problem this project addresses."},
+    {"title": "Objectives", "purpose": "Measurable aims of the project."},
+    {"title": "Scope", "purpose": "What the project covers and what it leaves out."},
+    {"title": "Literature Review", "purpose": "What existing work says, and the gap this project fills."},
+    {"title": "Methodology", "purpose": "How the work is done, and why this approach."},
+    {"title": "Expected Results / Results", "purpose": "What was (or is expected to be) produced and found."},
+    {"title": "Discussion", "purpose": "What the results mean, limitations and their impact."},
+    {"title": "Conclusion and Future Work", "purpose": "Summary of contributions and next steps."}
+  ]
+}

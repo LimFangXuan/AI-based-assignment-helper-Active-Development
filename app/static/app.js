@@ -441,7 +441,7 @@
 
   // ---------- AI 拆解草稿：增删行 ----------
   $$("[data-draft]").forEach((box) => {
-    const tpl = $("template", box.parentElement);
+    const tpl = $("template[data-row-template]");
     const renumber = () => $$(".draft-row", box).forEach((r, i) => { $(".idx", r).textContent = i + 1; });
     box.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-remove]");

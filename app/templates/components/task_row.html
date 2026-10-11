@@ -14,7 +14,8 @@
   </form>
   <div class="body">
     <span class="title">{{ task.title }}</span>
-    <div class="meta">{% if task.due_date and not hide_date %}<span class="tag {% if late %}overdue{% elif task.due_date == today %}dark{% endif %}"><i class="ph ph-calendar-blank"></i>{{ task.due_date | relday }}{% if late %} (overdue){% endif %}</span>{% endif %}{% if task.minutes %}<span class="tag"><i class="ph ph-timer"></i>{{ task.minutes | minutes_label }}</span>{% endif %}{% if agenda %}<a class="proj" href="{{ url_for('planner.index', project_id=task.project_id) }}"><span class="dot {{ task.project.status }}" aria-hidden="true"></span>{{ task.project.name }}</a>{% endif %}</div>
+    {% if task.detail and not agenda %}<div class="muted small task-detail">{{ task.detail }}</div>{% endif %}
+    <div class="meta">{% if task.due_date and not hide_date %}<span class="tag {% if late %}overdue{% elif task.due_date == today %}dark{% endif %}"><i class="ph ph-calendar-blank"></i>{{ task.due_date | relday }}{% if late %} (overdue){% endif %}</span>{% endif %}{% if task.minutes %}<span class="tag"><i class="ph ph-timer"></i>{{ task.minutes | minutes_label }}</span>{% endif %}{% if task.based_on_assumption %}<span class="tag overdue" title="Depends on a requirement that was assumed, not confirmed">Assumption</span>{% endif %}{% if agenda %}<a class="proj" href="{{ url_for('planner.index', project_id=task.project_id) }}"><span class="dot {{ task.project.status }}" aria-hidden="true"></span>{{ task.project.name }}</a>{% endif %}</div>
   </div>
   {% if not agenda %}
   <div class="actions">

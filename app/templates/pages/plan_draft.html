@@ -4,36 +4,52 @@
 {% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, url_for('planner.index', project_id=project.id)), ("Draft", None)] %}
 {% set crumb_icon = tool.icon %}
 {% block page_class %}narrow{% endblock %}
+
+{% macro row(st=None, index=None) -%}
+<div class="draft-row {% if st %}entering{% endif %}" {% if st %}style="animation-delay: {{ index * 45 }}ms"{% endif %}>
+  <span class="idx">{{ index + 1 if st else '' }}</span>
+  <div class="draft-main">
+    <input type="text" name="title" value="{{ st.title if st else '' }}" maxlength="200" aria-label="Task">
+    <input type="text" name="detail" value="{{ st.detail if st else '' }}" maxlength="400" class="detail-input" placeholder="What “done” looks like (optional)" aria-label="Detail">
+    {% if st and st.based_on_assumption %}<span class="tag overdue" style="justify-self:start;">Relies on an assumption</span>{% endif %}
+  </div>
+  <input class="d" type="date" name="due_date" value="{{ st.due_date.isoformat() if st and st.due_date else '' }}" aria-label="Date">
+  <input class="m" type="number" name="minutes" min="5" max="600" step="5" value="{{ st.minutes if st and st.minutes else '' }}" placeholder="Minutes" aria-label="Estimated minutes">
+  <input type="hidden" name="assumed" value="{{ '1' if st and st.based_on_assumption else '0' }}">
+  <button class="icon-btn" type="button" data-remove aria-label="Remove this task"><i class="ph ph-x"></i></button>
+</div>
+{%- endmacro %}
+
 {% block content %}
+{% if plan.feasibility != 'ok' %}
+<div class="notice {{ 'danger' if plan.feasibility == 'too_short' }}"><i class="ph ph-warning"></i>
+  <span><strong>{{ 'Time is too short.' if plan.feasibility == 'too_short' else 'The schedule is tight.' }}</strong> {{ plan.message }}</span></div>
+{% elif plan.message %}
+<div class="notice ok"><i class="ph ph-check-circle"></i><span>{{ plan.message }}</span></div>
+{% endif %}
+
 <form method="POST" action="{{ url_for('planner.save', project_id=project.id) }}" class="card reveal">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   <p class="muted small" style="margin:0 0 10px;">Deadline: {{ project.deadline.strftime('%d %b %Y, %H:%M') }}. Dates are kept between today and the deadline. Rows with an empty name are not saved.</p>
   <div data-draft>
-    {% for st in steps %}
-      <div class="draft-row entering" style="animation-delay: {{ loop.index0 * 55 }}ms">
-        <span class="idx">{{ loop.index }}</span>
-        <input type="text" name="title" value="{{ st.title }}" maxlength="200" aria-label="Task {{ loop.index }}">
-        <input class="d" type="date" name="due_date" value="{{ st.due_date.isoformat() if st.due_date else '' }}" aria-label="Date">
-        <input class="m" type="number" name="minutes" min="5" max="600" step="5" value="{{ st.minutes or '' }}" placeholder="Minutes" aria-label="Estimated minutes">
-        <button class="icon-btn" type="button" data-remove aria-label="Remove this task"><i class="ph ph-x"></i></button>
-      </div>
-    {% endfor %}
+    {% for st in plan.steps %}{{ row(st, loop.index0) }}{% endfor %}
   </div>
-  <div class="btn-row" style="justify-content:space-between;margin-top:14px;">
-    <button class="btn ghost" type="button" data-add-row><i class="ph ph-plus"></i>Add a row</button>
-    <div class="btn-row">
-      <a class="btn secondary" href="{{ url_for('planner.index', project_id=project.id) }}">Discard</a>
-      <button class="btn" type="submit"><i class="ph ph-check"></i>Save these tasks</button>
-    </div>
+  <button class="btn ghost" type="button" data-add-row style="margin-top:10px;"><i class="ph ph-plus"></i>Add a row</button>
+
+  {% if has_planned %}
+  <hr class="soft">
+  <label id="mode-label" style="margin-top:0;">Your earlier AI-planned tasks that are not done yet</label>
+  <div class="segmented" role="radiogroup" aria-labelledby="mode-label">
+    <label><input type="radio" name="mode" value="replace" checked><span><i class="ph ph-swap"></i>Replace them</span></label>
+    <label><input type="radio" name="mode" value="append"><span><i class="ph ph-plus"></i>Keep them and add these</span></label>
+  </div>
+  <p class="field-hint" style="margin-top:8px;">Tasks you added yourself and tasks already done are never replaced.</p>
+  {% endif %}
+
+  <div class="btn-row" style="justify-content:flex-end;margin-top:16px;">
+    <a class="btn secondary" href="{{ url_for('planner.index', project_id=project.id) }}">Discard</a>
+    <button class="btn" type="submit"><i class="ph ph-check"></i>Save these tasks</button>
   </div>
 </form>
-<template>
-  <div class="draft-row">
-    <span class="idx"></span>
-    <input type="text" name="title" maxlength="200" aria-label="New task">
-    <input class="d" type="date" name="due_date" aria-label="Date">
-    <input class="m" type="number" name="minutes" min="5" max="600" step="5" placeholder="Minutes" aria-label="Estimated minutes">
-    <button class="icon-btn" type="button" data-remove aria-label="Remove this task"><i class="ph ph-x"></i></button>
-  </div>
-</template>
+<template data-row-template>{{ row() }}</template>
 {% endblock %}

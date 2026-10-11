@@ -1,0 +1,23 @@
+{# 项目 framework 的展示：Prompt Generator 页用。需要变量 fw #}
+<section class="card">
+  <h2>Project framework</h2>
+  {% if fw.goal %}<p style="margin:10px 0 4px;"><strong>Goal:</strong> {{ fw.goal }}</p>{% endif %}
+  {% if fw.approach %}<p class="muted">{{ fw.approach }}</p>{% endif %}
+  <ol class="phase-list">
+    {% for p in fw.phases %}
+      <li class="phase">
+        <div class="phase-head"><strong>{{ p.name }}</strong>{% if p.based_on_assumption %}<span class="tag overdue">Relies on an assumption</span>{% endif %}</div>
+        {% if p.goal %}<div class="muted small">{{ p.goal }}</div>{% endif %}
+        <ul class="plain" style="margin:6px 0 4px;">{% for s in p.steps %}<li>{{ s }}</li>{% endfor %}</ul>
+        {% if p.deliverables %}<div class="small"><span class="muted">Output:</span> {{ p.deliverables | join('; ') }}</div>{% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+  {% if fw.methods %}<p class="small" style="margin:12px 0 4px;"><strong>Methods:</strong> {{ fw.methods | join('; ') }}</p>{% endif %}
+  {% if fw.deliverables %}<p class="small" style="margin:0 0 4px;"><strong>Final deliverables:</strong> {{ fw.deliverables | join('; ') }}</p>{% endif %}
+  {% if fw.risks %}<p class="small" style="margin:0 0 4px;"><strong>Risks to watch:</strong> {{ fw.risks | join('; ') }}</p>{% endif %}
+  {% if fw.assumptions_used %}
+    <div class="notice" style="margin-top:12px;"><i class="ph ph-warning"></i><span>Built on assumptions: {{ fw.assumptions_used | join('; ') }}</span></div>
+  {% endif %}
+  <p class="small" style="margin:12px 0 0;"><strong>The AI chat will act as:</strong> <span class="muted">{{ fw.ai_role }}</span></p>
+</section>

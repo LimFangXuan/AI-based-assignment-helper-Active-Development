@@ -1,10 +1,11 @@
+import json
 from datetime import datetime
 
 from ..extensions import db
 
 
 class ReportDraft(db.Model):
-    """Report Drafter 的一份草稿。阶段 5 才开始写入。"""
+    """Report Drafter 的一份草稿：大纲 + 逐节内容。重新生成大纲会建一份新的，旧的保留。"""
 
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey("project.id"), nullable=False)
@@ -16,6 +17,10 @@ class ReportDraft(db.Model):
     sections = db.relationship("ReportSection", backref="draft", cascade="all, delete-orphan",
                                order_by="ReportSection.position")
 
+    @property
+    def outline(self):
+        return json.loads(self.outline_json or "{}")
+
 
 class ReportSection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -26,3 +31,8 @@ class ReportSection(db.Model):
     status = db.Column(db.String(20), nullable=False, default="pending")  # pending / draft / approved
     student_notes = db.Column(db.Text, nullable=False, default="")
     cited_paper_ids_json = db.Column(db.Text, nullable=False, default="[]")
+    assumptions_json = db.Column(db.Text, nullable=False, default="[]")  # 这一节依赖的假设，页面上要标出来
+
+    @property
+    def assumptions(self):
+        return json.loads(self.assumptions_json or "[]")

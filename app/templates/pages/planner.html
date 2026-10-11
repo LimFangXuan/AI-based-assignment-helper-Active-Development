@@ -1,20 +1,28 @@
 {% extends "layout.html" %}
 {% from "components/macros.html" import project_line with context %}
 {% set page_title = tool.name %}
-{% set page_desc = "Daily tasks that fit before the deadline. Tick them off here or from Today." %}
+{% set page_desc = "Daily tasks that fit before the deadline, planned from your framework. Tick them off here or from Today." %}
 {% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
 {% set crumb_icon = tool.icon %}
 {% set prog = project.progress %}
 {% block under_heading %}{{ project_line(project) }}{% endblock %}
 {% block header_actions %}
+{% if framework_session %}
 <form method="POST" action="{{ url_for('planner.draft', project_id=project.id) }}" style="margin:0;"
-      data-ai="Reading the description and guideline|Breaking the work into small tasks|Spreading them out before the deadline">
+      data-ai="Reading your framework|Breaking each phase into daily tasks|Checking the time before the deadline">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-  <button class="btn {{ 'secondary' if project.tasks }}" type="submit"><i class="ph ph-magic-wand"></i>{{ 'Plan more with AI' if project.tasks else 'Plan with AI' }}</button>
+  <button class="btn {{ 'secondary' if project.tasks }}" type="submit"><i class="ph ph-magic-wand"></i>{{ 'Plan again with AI' if project.tasks else 'Plan with AI' }}</button>
 </form>
+{% endif %}
 {% endblock %}
 {% block page_class %}narrow{% endblock %}
 {% block content %}
+{% if not framework_session %}
+<div class="notice"><i class="ph ph-info"></i><span>To plan with AI, confirm a framework in the
+  <a class="link" href="{{ url_for('prompt.index', project_id=project.id) }}">Prompt Generator</a> first. You can still add tasks yourself below.</span></div>
+{% elif stale %}
+<div class="notice"><i class="ph ph-info"></i><span>Details changed since these tasks were planned. Update? Use “Plan again with AI” and choose to replace the planned tasks.</span></div>
+{% endif %}
 <section class="card reveal" aria-labelledby="tasks-h">
   <div class="module-head" style="margin-bottom:10px;">
     <h2 id="tasks-h">Tasks</h2>
@@ -28,7 +36,7 @@
   <div class="empty" data-task-empty {% if project.tasks %}hidden{% endif %}>
     <i class="ph ph-stack"></i>
     <strong>No tasks yet</strong>
-    Use “Plan with AI” to get a draft you can edit, or add tasks yourself below.
+    {% if framework_session %}Use “Plan with AI” to get a draft you can edit, or add tasks yourself below.{% else %}Add tasks yourself below, or plan with AI once your framework is confirmed.{% endif %}
   </div>
 
   <form class="composer" method="POST" action="{{ url_for('planner.task_add', project_id=project.id) }}" data-composer="task-list">

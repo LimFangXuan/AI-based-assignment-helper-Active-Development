@@ -623,7 +623,10 @@ def paper_detail(project_id, paper_id):
     return render_template("paper_detail.html", project=project, paper=paper)
 
 
+# 导入时就建表：无论用 python app.py、flask run 还是 gunicorn 启动，数据库都已经准备好
+with app.app_context():
+    ensure_schema()  # 建新表 + 给旧表补新列，已有数据不会动
+
 if __name__ == "__main__":
-    with app.app_context():
-        ensure_schema()  # 建新表 + 给旧表补新列，已有数据不会动
-    app.run(debug=True)
+    # 调试模式会开启 Werkzeug 调试器（可以在网页上执行代码），只能在本机开发时打开
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1")

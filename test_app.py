@@ -15,6 +15,9 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import SimpleNamespace
 
+# Windows 终端默认编码（cp1252/gbk）打不出部分中文，统一用 UTF-8 输出
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 TMP = tempfile.mkdtemp()
 os.environ["SECRET_KEY"] = "test-secret"

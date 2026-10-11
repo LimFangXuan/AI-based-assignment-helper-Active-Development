@@ -1,8 +1,6 @@
 # Assignment Helper
 
-A web app that helps university students get assignments done on time: clarify what the task really asks, turn it into a solid AI prompt, split the work into daily tasks before the deadline, find real academic papers, and draft the write-up one approved section at a time.
-
-> **Status: portfolio project.** It runs locally and comes with a self-contained [demo mode](#try-the-demo-2-minutes) that uses only fictional sample data and sends nothing to outside services. It is not deployed and has no real users.
+A web app that helps university students get assignments done on time: clarify what the task really asks, turn it into a solid AI prompt, split the work into daily tasks before the deadline, find real academic papers, and draft the write-up one approved section at a time.[demo mode](#try-the-demo-2-minutes) 
 
 ![Overview](docs/screenshots/02-overview.png)
 

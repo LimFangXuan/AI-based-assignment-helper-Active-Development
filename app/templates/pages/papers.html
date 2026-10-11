@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% set page_title = tool.name %}
+{% set page_desc = "The AI turns your confirmed summary into search terms, OpenAlex returns real papers, and the AI may only pick from those. Code checks every pick against the search results." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="reveal">
+{% if hint %}
+  <div class="notice"><i class="ph ph-info"></i><span>{{ hint }} <a class="link" href="{{ url_for('prompt.index', project_id=project.id) }}">Open Prompt Generator</a></span></div>
+{% else %}
+  <section class="card">
+    <h2>Search for papers</h2>
+    <form method="POST" action="{{ url_for('papers.new', project_id=project.id) }}" class="inline-form" style="margin-top:14px;"
+          data-ai="Writing English search terms|Searching OpenAlex for real papers|Picking from the results and checking sources">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label>How many
+        <input type="number" name="count" min="{{ min_papers }}" max="{{ max_papers }}" value="5" required></label>
+      <label><input type="checkbox" name="oa_only" value="1" checked> Open access only (free full text)</label>
+      <button class="btn" type="submit"><i class="ph ph-magnifying-glass"></i>Find papers</button>
+    </form>
+  </section>
+{% endif %}
+
+{% for search in project.paper_searches %}
+  <section class="card">
+    <h2>Search of {{ search.created_at.strftime('%d %b %Y, %H:%M') }}</h2>
+    <p class="muted small" style="margin:6px 0 4px;">Search terms: {{ search.queries | join('; ') }} · {{ search.papers | length }} picked from {{ search.candidate_count }} candidates
+      (asked for {{ search.requested_count }}{% if search.oa_only %}, open access only{% endif %})</p>
+    {% for p in search.papers %}
+      <div class="paper-item">
+        <div class="paper-title"><a href="{{ url_for('papers.detail', project_id=project.id, paper_id=p.id) }}">{{ p.title }}</a></div>
+        <div class="paper-meta">{{ p.authors or 'Unknown authors' }}{% if p.year %} · {{ p.year }}{% endif %}{% if p.venue %} · {{ p.venue }}{% endif %}</div>
+        <div class="paper-desc">{{ (p.abstract_snippet[:180] ~ '…') if p.abstract_snippet else '(No abstract from OpenAlex)' }}</div>
+      </div>
+    {% endfor %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

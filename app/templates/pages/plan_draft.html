@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+{% set page_title = "Check the AI's task plan" %}
+{% set page_desc = "This is only a draft. Rename, move dates, delete what you don't need, then save." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, url_for('planner.index', project_id=project.id)), ("Draft", None)] %}
+{% set crumb_icon = tool.icon %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<form method="POST" action="{{ url_for('planner.save', project_id=project.id) }}" class="card reveal">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <p class="muted small" style="margin:0 0 10px;">Deadline: {{ project.deadline.strftime('%d %b %Y, %H:%M') }}. Dates are kept between today and the deadline. Rows with an empty name are not saved.</p>
+  <div data-draft>
+    {% for st in steps %}
+      <div class="draft-row entering" style="animation-delay: {{ loop.index0 * 55 }}ms">
+        <span class="idx">{{ loop.index }}</span>
+        <input type="text" name="title" value="{{ st.title }}" maxlength="200" aria-label="Task {{ loop.index }}">
+        <input class="d" type="date" name="due_date" value="{{ st.due_date.isoformat() if st.due_date else '' }}" aria-label="Date">
+        <input class="m" type="number" name="minutes" min="5" max="600" step="5" value="{{ st.minutes or '' }}" placeholder="Minutes" aria-label="Estimated minutes">
+        <button class="icon-btn" type="button" data-remove aria-label="Remove this task"><i class="ph ph-x"></i></button>
+      </div>
+    {% endfor %}
+  </div>
+  <div class="btn-row" style="justify-content:space-between;margin-top:14px;">
+    <button class="btn ghost" type="button" data-add-row><i class="ph ph-plus"></i>Add a row</button>
+    <div class="btn-row">
+      <a class="btn secondary" href="{{ url_for('planner.index', project_id=project.id) }}">Discard</a>
+      <button class="btn" type="submit"><i class="ph ph-check"></i>Save these tasks</button>
+    </div>
+  </div>
+</form>
+<template>
+  <div class="draft-row">
+    <span class="idx"></span>
+    <input type="text" name="title" maxlength="200" aria-label="New task">
+    <input class="d" type="date" name="due_date" aria-label="Date">
+    <input class="m" type="number" name="minutes" min="5" max="600" step="5" placeholder="Minutes" aria-label="Estimated minutes">
+    <button class="icon-btn" type="button" data-remove aria-label="Remove this task"><i class="ph ph-x"></i></button>
+  </div>
+</template>
+{% endblock %}

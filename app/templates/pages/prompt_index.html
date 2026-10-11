@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% set page_title = tool.name %}
+{% set page_desc = "The AI checks the task for conflicts, asks a few key questions, then builds a prompt you can paste into any AI chat." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="reveal">
+  <section class="card">
+    <h2>Start a new prompt</h2>
+    <p class="muted" style="margin:6px 0 16px;">Takes two AI calls (a check and the questions), so allow about 15 seconds.</p>
+    <form method="POST" action="{{ url_for('prompt.new', project_id=project.id) }}"
+          data-ai="Checking whether the task is feasible|Looking for conflicts with the guideline|Preparing a few key questions">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn" type="submit"><i class="ph ph-sparkle"></i>Start</button>
+    </form>
+  </section>
+
+  <section class="card" aria-labelledby="history-h">
+    <h2 id="history-h">History</h2>
+    {% for ps in project.prompt_sessions %}
+      <a class="history-row" href="{{ url_for('prompt.view', project_id=project.id, session_id=ps.id) }}">
+        <i class="ph {{ 'ph-check-circle' if ps.final_prompt else ('ph-warning-circle' if ps.blocked else 'ph-circle-dashed') }}"></i>
+        <span class="when">{{ ps.created_at.strftime('%d %b %Y, %H:%M') }}</span>
+        <span class="muted small">{% if ps.final_prompt %}Prompt ready{% elif ps.summary and not ps.blocked %}Waiting for your check{% elif ps.blocked %}<span class="overdue-text">Unresolved conflict</span>{% else %}Waiting for your answers{% endif %}</span>
+        {% if ps.content_fingerprint and ps.content_fingerprint != project.fingerprint %}<span class="tag soon" title="The description or guideline changed after this was created">Out of date</span>{% endif %}
+        <i class="ph ph-caret-right"></i>
+      </a>
+    {% else %}
+      <p class="muted" style="margin:8px 0 0;">No prompts yet.</p>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}

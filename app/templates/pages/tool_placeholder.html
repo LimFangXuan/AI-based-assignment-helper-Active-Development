@@ -1,0 +1,14 @@
+{% extends "layout.html" %}
+{% set page_title = tool.name %}
+{% set page_desc = tool.description %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="card empty reveal">
+  <i class="ph {{ tool.icon }}"></i>
+  <strong>Coming soon</strong>
+  This tool is not built yet. The other tools for this project already work.
+  <div class="btn-row"><a class="btn secondary" href="{{ url_for('projects.detail', project_id=project.id) }}"><i class="ph ph-arrow-left"></i>Back to project</a></div>
+</div>
+{% endblock %}

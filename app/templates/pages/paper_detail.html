@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{% set page_title = paper.title %}
+{% set page_desc = (paper.authors or 'Unknown authors') ~ ((' · ' ~ paper.year) if paper.year else '') ~ ((' · ' ~ paper.venue) if paper.venue else '') %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, url_for('papers.index', project_id=project.id)), ("Paper", None)] %}
+{% set crumb_icon = "ph-file-text" %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="reveal">
+<section class="card">
+  <h2>Why the AI picked it</h2>
+  <p style="margin-top:10px;">{{ paper.reason }}</p>
+  {% if paper.relevance %}<p class="muted small">AI relevance: {{ paper.relevance }}/10 (only for your own screening, don't put it in your work)</p>{% endif %}
+  <p class="muted small" style="margin:0;">The reason is based on the title and abstract only; the AI has not read the full text. The paper itself comes from OpenAlex, not from the AI.</p>
+</section>
+
+<section class="card">
+  <h2>Details</h2>
+  <div class="diag-grid">
+    <div><strong>Authors</strong></div><div>{{ paper.author_list | join(', ') if paper.author_list else 'Unknown' }}</div>
+    <div><strong>Year</strong></div><div>{{ paper.year or 'Unknown' }}</div>
+    <div><strong>Published in</strong></div><div>{{ paper.venue or 'Unknown' }}{% if paper.volume %}, vol. {{ paper.volume }}{% endif %}{% if paper.issue %} ({{ paper.issue }}){% endif %}{% if paper.pages %}, pp. {{ paper.pages }}{% endif %}</div>
+    <div><strong>Type</strong></div><div>{{ paper.work_type or 'Unknown' }}</div>
+    <div><strong>Cited by</strong></div><div>{{ paper.cited_by_count }}</div>
+    <div><strong>Open access</strong></div><div>{% if paper.is_oa %}<span class="badge good">Yes</span>{% else %}<span class="badge neutral">No</span>{% endif %}</div>
+    <div><strong>DOI</strong></div><div>{% if paper.doi %}<a class="link" href="{{ paper.doi if paper.doi.startswith('http') else 'https://doi.org/' ~ paper.doi }}" target="_blank" rel="noopener noreferrer">{{ paper.doi }}</a>{% else %}None{% endif %}</div>
+    <div><strong>Links</strong></div><div>
+      {% if paper.url %}<a class="link" href="{{ paper.url }}" target="_blank" rel="noopener noreferrer">Paper page</a>{% endif %}
+      {% if paper.oa_url %} · <a class="link" href="{{ paper.oa_url }}" target="_blank" rel="noopener noreferrer">Free full text</a>{% endif %}
+      {% if not paper.url and not paper.oa_url %}None{% endif %}</div>
+    <div><strong>OpenAlex ID</strong></div><div class="mono">{{ paper.openalex_id }}</div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Abstract</h2>
+  <p style="white-space:pre-wrap;margin-top:10px;">{{ paper.abstract_snippet or '(No abstract from OpenAlex)' }}{% if paper.abstract_snippet|length >= 600 %}…{% endif %}</p>
+</section>
+
+<section class="card">
+  <div class="module-head"><h2>Citation (close to APA)</h2><button class="btn small" type="button" data-copy="citation"><i class="ph ph-copy"></i>Copy</button></div>
+  <div class="citation" id="citation">{{ paper.citation }}</div>
+  <p class="muted small" style="margin:10px 0 0;">Built from OpenAlex metadata, not by the AI. Check the format against the original before you submit.</p>
+</section>
+<p class="muted small" style="margin-top:14px;">From the search of {{ paper.search.created_at.strftime('%d %b %Y, %H:%M') }}. Search terms: {{ paper.search.queries | join('; ') }}</p>
+</div>
+{% endblock %}

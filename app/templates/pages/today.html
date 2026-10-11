@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% set page_title = "Today" %}
+{% set page_desc = "Tasks due today, plus anything overdue. Tick them off as you go." %}
+{% set crumbs = [("Today", None)] %}
+{% set crumb_icon = "ph-sun-horizon" %}
+{% block under_heading %}
+<div class="project-meta">
+  <span class="tag"><i class="ph ph-list-checks"></i><span id="today-count">{{ overdue | length + due_today | length }}</span>&nbsp;to do</span>
+  <span class="tag"><i class="ph ph-timer"></i>About {{ minutes | minutes_label }}</span>
+  <span class="tag ok"><i class="ph ph-check"></i><span data-done-today>{{ done_today }}</span>&nbsp;done today</span>
+</div>
+{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="reveal">
+  {% if overdue %}
+  <section class="card" aria-labelledby="overdue-h" data-agenda-day>
+    <div class="module-head"><h2 id="overdue-h" class="overdue-text"><i class="ph ph-warning-circle"></i>Overdue</h2></div>
+    <ul class="task-list" data-task-list data-mode="agenda" data-counter="today-count" data-empty="today-empty">
+      {% for task in overdue %}{% with agenda=True %}{% include "components/task_row.html" %}{% endwith %}{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section class="card" aria-labelledby="today-h">
+    <div class="module-head"><h2 id="today-h">Due today</h2></div>
+    <ul class="task-list" data-task-list data-mode="agenda" data-counter="today-count" data-empty="today-empty">
+      {% for task in due_today %}{% with agenda=True, hide_date=True %}{% include "components/task_row.html" %}{% endwith %}{% endfor %}
+    </ul>
+    <div class="empty" id="today-empty" {% if overdue or due_today %}hidden{% endif %}>
+      <i class="ph ph-coffee"></i>
+      <strong>Nothing due today</strong>
+      Get ahead with <a class="link" href="{{ url_for('overview.upcoming') }}">the next 6 days</a>, or plan tasks in a project's Task Planner.
+    </div>
+    {% if overdue and not due_today %}<p class="muted small" style="margin:8px 0 0;">Nothing else is due today.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

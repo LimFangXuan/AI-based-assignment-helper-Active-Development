@@ -1,72 +1,78 @@
 # Assignment Helper
 
-A web app that helps students stay on top of assignments and turns a vague project idea into a clear, structured prompt for any AI assistant.
+A web app that helps students get assignments done on time: clarify what the task really asks, turn it into a solid AI prompt, split the work into daily tasks before the deadline, find real academic papers, and draft the write-up.
 
 I built it to learn how to integrate an LLM API into a real backend: authentication, a database, server-side AI calls, structured output, and graceful failure handling.
 
+## The workflow
+
+Each project has five tools. The order is the dependency chain: every tool reads the confirmed output of the ones before it.
+
+| # | Tool | What it does | Status |
+|---|---|---|---|
+| 1 | Requirements Checklist | Asks questions until every aspect of the task is clear; anything left unclear becomes a labelled assumption. | Planned |
+| 2 | Prompt Generator | Turns the confirmed requirements into a project framework and a copy-paste prompt for any AI chat. | Works (current version: check → questions → summary → prompt) |
+| 3 | Task Planner | Splits the work into daily tasks that fit before the deadline. | Works (AI draft from description + guideline, fully editable) |
+| 4 | Paper Finder | Finds real papers on OpenAlex; the AI may only pick from what was retrieved. | Works |
+| 5 | Report Drafter | Builds the document section by section, citing only papers from the Paper Finder. | Planned |
+
+Paper Finder and Report Drafter are hidden for *Portfolio* and *Exam preparation* projects. The type is chosen by the student, not guessed by the AI.
+
 ## Features
 
-- **Accounts** – register / login / logout, passwords stored as salted hashes, session-based auth.
-- **Today / this week** – the dashboard opens on what is due today (plus anything overdue) and the next six days, grouped by day, with the estimated time for today. Ticking a step there updates everything in place.
-- **Steps** – every assignment can be split into small steps with their own date and estimated minutes. Steps can be added (press Enter to keep adding), edited inline, ticked, deleted and reordered by dragging. Progress rings and the project status follow automatically: the first tick moves a project to *in progress*, the last one to *done*.
-- **AI breakdown** – the AI turns the assignment description into 4–10 concrete steps spread between today and the deadline. The result is only a draft: the student edits, removes or adds rows before anything is saved. Dates and durations are validated in code (clamped to today…deadline, nonsense values dropped).
-- **Dashboard** – each assignment has a colored status dot and progress ring: red = not started, yellow = in progress, cyan = done (not yet submitted). Overdue items are highlighted; filter chips narrow the list by status.
-- **Create project** – name, deadline (date + time picker), free-text description.
-- **Submit** – the "Submitted" button hides the project from the dashboard (soft delete: data is kept and listed on the *Submitted* page, and can be moved back to *in progress*). **Delete** permanently removes a project after a confirmation dialog.
-- **Edit project** – update the description, e.g. to record a lecturer's written permission, then regenerate.
-- **Paper recommendations** (report, literature review, software and data/ML projects) – a fixed-flow RAG pipeline (retrieval-augmented generation: retrieve real sources first, then let the AI work only with what was retrieved). The AI turns the confirmed summary into English search terms, OpenAlex returns real papers, the AI may only pick from those candidates and explain why, and code checks every picked ID against the candidate list. The student chooses how many papers (1–10) and whether to keep open-access papers only. Results are stored and shown like a search-results list; each paper has a detail page with metadata, the AI's reason and a citation generated from metadata (not by the AI).
-- **Prompt generator** – before asking anything, the AI **diagnoses** the project (feasibility, guideline fit, scope, conflicts). It then asks 3–5 clarifying questions (multiple choice, an "I don't know" option, and a free-text box), and produces a summary that separates **confirmed facts, recommendations and assumptions**, plus a ready-to-copy prompt built on a six-step framework. **If a conflict is still unresolved, no prompt is generated.**
-
-## How the prompt generator works
-
-```
-Project description (messy notes, brief, CV ...)
-   -> Gemini: diagnosis (JSON)                   [feasible? fits the brief? scope? conflicts, each with quoted evidence]
-   -> Gemini: clarifying questions (JSON)        [question bank chosen by project type; conflicts first]
-   -> Student answers (choice / free text / "don't know")
-   -> Gemini: summary + prompt design (JSON)     [confirmed / recommended / assumed / unresolved conflicts,
-                                                  plus a role, interaction mode and six steps made for THIS project]
-   -> Student reviews the summary and design     [write a correction -> regenerate; or confirm]
-   -> unresolved conflict? yes -> blocked page (add context, edit the project, or re-answer)
-                           no  -> final prompt is assembled in code (no AI call)
-```
-
-The final prompt is **customised per project**: preparing an interview produces a prompt in which the AI plays the hiring manager and asks one question at a time; a software project produces one in which it acts as a senior engineer who guides rather than writes everything. The model proposes the role, interaction rules, six step names/instructions and any special requests the student made. Code validates the design (exactly six steps, a role, etc.) and falls back to a generic design when it is invalid, so a bad model answer degrades gracefully instead of failing.
-
-The safety part of the prompt is **not** left to the model: confirmed facts, recommendations and assumptions are always separated, the "pre-execution check" and the rule against inventing sources or facts are always present, and no prompt is built while a conflict is unresolved. Confirming costs no AI call.
+- **Accounts**: register / login / logout, salted password hashes, session auth.
+- **Projects**: name, deadline, description (the task itself), guideline / marking rubric, type, individual or group, citation style. Live character counters.
+- **Overview**: a status ring (Not started / In progress / Ready to submit) with counts, today's and the next six days' task counts, then one card per project with a status filter.
+- **Today** and **Next 6 days**: tasks across all projects, grouped by day, ticked off in place.
+- **Calendar**: month grid of deadlines with a month strip, `+N more` for busy days, today marked.
+- **Sidebar**: create button, main menu, the 8 nearest projects with status dots, and an Overview badge for projects that are overdue or due within 3 days. Collapsible (remembered per browser); a drawer on phones.
+- **Tasks**: add (press Enter to keep adding), inline edit, tick, delete, drag to reorder. The project status follows: the first tick sets *In progress*, the last one *Ready to submit*.
+- **Submit / delete**: submitting is a soft delete (status `submitted`, data kept, can be moved back). Delete permanently removes a project after a confirmation dialog.
+- **Stale detection**: tool results store a fingerprint of the description + guideline; if either changes later, the result is marked out of date. Nothing is re-run automatically (that would spend AI quota).
+- **Light and dark themes**, chosen in Settings.
 
 ## Architecture
 
-| File | Responsibility |
-|---|---|
-| `app.py` | Flask routes, SQLAlchemy models, auth, CSRF protection |
-| `ai_client.py` | The only module that talks to Gemini: retries, JSON mode, error translation |
-| `prompt_builder.py` | The prompt-generator workflow: diagnosis, questions, summary + design, final prompt, validation of AI output |
-| `openalex_client.py` | The only module that talks to OpenAlex: search, field normalisation, abstract reconstruction from the inverted index |
-| `privacy.py` | Masks e-mail addresses and phone numbers before any text is sent to the AI or placed in a prompt |
-| `skills/prompt_generator/` | The method as plain files: decision rules, prompt-design rules, question banks and best practices per project type (assignments, interview preparation, skill learning) |
-| `templates/`, `static/` | Jinja2 pages, the CSS design system (light + dark tokens) and `app.js` (progressive enhancement: partial updates, tabs, dialogs, drag-and-drop) |
-| `seed_demo.py` | Creates a local demo account with sample assignments and steps |
-| `test_app.py` | Automated tests (AI is mocked; no API quota used) |
+```
+run.py                     entry point (python run.py, or a WSGI server pointed at run:app)
+app/
+  __init__.py              create_app(): config, extensions, blueprints, CSRF hook, ensure_schema()
+  extensions.py            db = SQLAlchemy()
+  security.py              login_required, CSRF, ownership checks, safe redirects
+  constants.py             statuses, types, length limits, thresholds (one place to tune)
+  tools_registry.py        the five tools, their order and visibility
+  schema.py                ensure_schema(): new tables, missing columns, indexes
+  template_helpers.py      template filters and sidebar data (one query)
+  models/                  user, project, requirements, prompt, plan (tasks), paper, report
+  blueprints/              auth, overview (/, /today, /upcoming), calendar, projects, tools/*
+  services/                no Flask request objects and no imports from models
+    ai_client.py           the only module that talks to Gemini
+    openalex_client.py     the only module that talks to OpenAlex
+    privacy.py             masks emails and phone numbers before text reaches the AI
+    prompt_builder.py      prompt generator workflow and paper prompts
+    task_planner.py        AI task breakdown and date validation
+  skills/prompt_generator/ rules, question banks and best practices as plain files
+  templates/               layout.html, components/, pages/
+  static/                  style.css (design tokens, light + dark), app.js
+test_app.py                automated tests (AI and OpenAlex are mocked)
+seed_demo.py               local demo account with sample data
+check_models.py            checks which Gemini models currently work
+```
 
 ## Design decisions
 
-- **The skill lives in the repo, not in a vendor.** The method was first written as a Claude Agent Skill. Instead of depending on one platform, its rules, question banks and best practices were ported into `skills/prompt_generator/` and loaded by code, so the same knowledge works with any model. Adding a project type means adding a file.
-- **The AI can only recommend papers that were actually retrieved.** Its picks are validated in code: IDs are normalised, anything not in the candidate set is dropped and logged, duplicates are removed, and nothing is stored unless the whole pipeline succeeds. Abstracts from OpenAlex are wrapped as data so instruction-like text inside them is not treated as instructions. This is a fixed pipeline, not tool use: code decides when to search; the model only proposes search terms and chooses among results.
-- **Privacy.** E-mail addresses and phone numbers are masked before text reaches the model or a generated prompt; the database keeps the user's original text. Other personal details (addresses, ID numbers) cannot be detected reliably, and the form warns users not to enter them.
-- **Human in the loop.** Nothing is generated until the student has seen and, if needed, corrected the AI's understanding and the proposed role/steps.
-- **Pushing back is a feature.** The workflow is designed to point out conflicts with the brief, oversized scope and contradictory information, and to refuse to help disguise a guideline violation, rather than agreeing with the student.
-- **AI calls only happen on the server.** The API key lives in `.env` (git-ignored) and never reaches the browser.
-- **One module owns all AI access.** Swapping model or provider touches `ai_client.py` only; the model name comes from `GEMINI_MODEL`.
-- **Graceful degradation.** Every request has a timeout (default 45 s, `GEMINI_TIMEOUT_SECONDS`) so a stalled call can never hang a page; 5xx errors are retried; if the primary model is overloaded (503), too slow (timeout), out of quota (429) or missing (404) the call automatically falls back to a second model (`GEMINI_FALLBACK_MODEL`). Errors that a different model cannot fix (invalid key, malformed request) do not trigger a fallback. Remaining failures are translated into a plain message for the user, while the real error goes to the console log. A failed AI call never leaves a half-written record. This was added after observing sustained 503 *"model is experiencing high demand"* responses on the free tier during development.
-- **AI output is validated, not trusted.** JSON is parsed and schema-checked; malformed or empty results are rejected with a retry prompt. Output is rendered through Jinja2 auto-escaping.
-- **Prompt-injection hygiene.** User-provided text is wrapped in delimiters and declared as data, not instructions.
-- **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project (other users get 404), a login-required decorator, identical error message for unknown user vs. wrong password.
-- **Soft delete.** Submitting changes `status` instead of deleting rows, so a misclick is recoverable and history is preserved.
-- **Works without JavaScript.** Every action is a normal form POST; `app.js` only upgrades it to an in-place update (requests carry `X-Requested-With: fetch` and get JSON back). The `next` redirect target is restricted to same-site paths.
-- **Motion has a job.** Animations mark a state change (tick, progress, new row, dialog, AI waiting) and are switched off under `prefers-reduced-motion`.
-- **Starts the same way everywhere.** Tables are created when `app` is imported, so `python app.py`, `flask run` and a WSGI server all work on a fresh database. Debug mode is off unless `FLASK_DEBUG=1`.
-- **Schema upgrades.** `db.create_all()` does not add columns to existing tables, so `ensure_schema()` adds missing ones at startup; existing users and data are kept.
+- **The skill lives in the repo, not in a vendor.** The method was first written as a Claude Agent Skill. Its rules, question banks and best practices were ported into `app/skills/prompt_generator/` and loaded by code, so the same knowledge works with any model.
+- **The AI can only recommend papers that were actually retrieved.** Picks are validated in code: IDs are normalised, anything not in the candidate set is dropped and logged, duplicates are removed, and nothing is stored unless the whole pipeline succeeds. This is a fixed pipeline, not tool use: code decides when to search; the model only proposes search terms and chooses among results.
+- **The generated prompt asks the other AI to work step by step** (one step at a time, waiting for the student's confirmation) rather than restricting it to guidance only. Its safety parts are not left to the model: confirmed facts, recommendations and assumptions are always separated, the rule against inventing sources or facts is always present, and no prompt is built while a conflict is unresolved.
+- **Dates are never trusted from the AI.** Task Planner drafts are clamped to today…deadline, nonsense durations are dropped, and nothing is saved until the student reviews the draft.
+- **Privacy.** Emails and phone numbers are masked in the description and the guideline before anything reaches the model; the database keeps the original text. Other personal details cannot be detected reliably, and the form warns about them.
+- **Prompt-injection hygiene.** Description, guideline and retrieved abstracts are wrapped in delimiters and declared as data, not instructions.
+- **AI output is validated, not trusted.** JSON is parsed and schema-checked; invalid output gives a retry message and never leaves a half-written record.
+- **Graceful degradation.** Every AI request has a timeout; 5xx errors are retried; an overloaded, slow, out-of-quota or missing primary model falls back to a second model. Errors a different model can't fix (bad key, bad request) don't trigger a fallback. Users see a plain message; the real error goes to the log.
+- **Works without JavaScript.** Every action is a normal form POST; `app.js` upgrades it to an in-place update (requests carry `X-Requested-With: fetch` and get JSON back). The `next` redirect target is restricted to same-site paths.
+- **Motion has a job.** Animations mark a state change (tick, progress, new row, dialog, AI waiting) and are switched off under `prefers-reduced-motion`. Status is always shown as text too, never by colour alone.
+- **Security basics.** Hashed passwords, per-session CSRF tokens on every POST, ownership checks on every project and child record (other users get 404), identical error for unknown user vs wrong password, Jinja auto-escaping.
+- **Schema upgrades without data loss.** `ensure_schema()` runs inside `create_app()`, so any start-up path works on a fresh database. Missing columns are added with `ALTER TABLE ... ADD COLUMN`; columns and tables are never dropped. Old projects get `type = other`, `individual` and an empty guideline.
 
 ## Setup
 
@@ -74,14 +80,14 @@ The safety part of the prompt is **not** left to the model: confirmed facts, rec
 python -m venv venv
 venv\Scripts\activate          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env           # then fill in SECRET_KEY and GEMINI_API_KEY
-python app.py                  # http://127.0.0.1:5000
+cp .env.example .env           # then fill in SECRET_KEY, GEMINI_API_KEY, OPENALEX_API_KEY
+python run.py                  # http://127.0.0.1:5000
 python seed_demo.py            # optional: local demo account with sample data
 ```
 
-Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. Never enable it on a public server: the Werkzeug debugger can run code.
+Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Get a Gemini key at https://aistudio.google.com and a free OpenAlex key at https://openalex.org/settings/api. Free-tier Gemini inputs may be used by Google to improve its models, so don't paste sensitive material.
 
-Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`. Get a Gemini key at https://aistudio.google.com. Free-tier inputs may be used by Google to improve its models, so don't paste sensitive material.
+Set `FLASK_DEBUG=1` in `.env` for auto-reload and error pages while developing. Never enable it on a public server: the Werkzeug debugger can run code.
 
 ## Tests
 
@@ -89,31 +95,21 @@ Generate a `SECRET_KEY` with `python -c "import secrets; print(secrets.token_hex
 python test_app.py
 ```
 
-242 checks covering auth, CSRF, steps (add / edit / tick / reorder / delete, automatic status, today and this-week views, open-redirect protection, per-user isolation), the AI breakdown (date clamping, invalid output, draft is not stored until saved), project deletion, starting on a fresh database without `python app.py`, access control between users, project/status/edit flow, skill file loading, the full diagnose → ask → summarise → confirm → prompt flow with a fake AI, per-project customisation (interview vs. software get different roles, steps and references), the revise loop, fallback when the AI's design is invalid, conflict blocking and evidence filtering, simulated 503/429/403/network failures, primary-to-fallback model switching, request timeouts (including a real SDK call against a deliberately slow local server), malformed AI output, the paper pipeline (fake network via httpx MockTransport: real parsing code, no real requests; invented IDs dropped, injected instructions kept inside the data block, timeouts/429/500 store nothing, HTML in titles escaped, javascript: links removed, per-user access control), e-mail/phone masking, and upgrading an existing database.
+250 checks covering auth and CSRF, per-user isolation on every route, the project form and its validation, status changes and soft delete, tool visibility by type, tasks (add / edit / tick / reorder / delete, automatic status, Today and Next 6 days, open-redirect protection), the AI task breakdown (date clamping, invalid output, nothing stored until saved), the full prompt flow with a fake AI (customisation per project, revise loop, conflict blocking), simulated 503/429/403/timeout/network failures and model fallback (including a real SDK call against a deliberately slow local server), the paper pipeline (fake network via `httpx.MockTransport`: invented IDs dropped, injected instructions kept inside the data block, failures store nothing, HTML escaped, `javascript:` links removed), email/phone masking, starting on a fresh database, and upgrading an old database without losing data.
 
-## Known limitations / roadmap
+## Roadmap
 
-- Description is text only; file upload / drag & drop of guidelines is not implemented yet.
-- One round of clarifying questions (the confirm page does allow written corrections and regeneration).
-- AI calls are synchronous: starting a prompt makes two calls (diagnosis + questions) and answering makes one, so the page waits several seconds (a waiting dialog explains what is happening). A background job queue would be the next step.
-- No reminders yet (e-mail / push before a step is due).
-- Drag-to-reorder uses HTML5 drag and drop, which does not work on touch screens.
-- Not deployed; development server only.
-- Planned: literature search module backed by a real scholarly API (so references are never invented), and an example-reference module.
+- Requirements Checklist (replaces the current check-and-questions stage of the Prompt Generator).
+- Prompt Generator rebuilt on the confirmed requirements, producing a project framework.
+- Task Planner and Paper Finder re-wired to read the framework instead of the description / old summary.
+- Report Drafter, section by section, citing only Paper Finder results.
+- Known limits: the current Prompt Generator still writes its questions and prompt in Chinese; drag-to-reorder doesn't work on touch screens; AI calls are synchronous; not deployed yet.
 
 ## Checking which models work right now
 
 ```bash
-python check_models.py                              # primary + fallback from .env
+python check_models.py
 python check_models.py gemini-3.8-flash gemini-3.5-flash-lite
 ```
 
-## Paper module notes
-
-- Requires a free OpenAlex key in `.env` (`OPENALEX_API_KEY`). It is sent in the `Authorization` header, not in the URL, so it does not end up in logs.
-- Retrieval is keyword-based full-text search; relevant papers can be missed. The AI's reason is based on the title and abstract only, not the full text.
-- "Relevance" is the model's own 1–10 rating, for personal screening only.
-
-## Notes on model names
-
-Model IDs are retired over time (during development `gemini-2.5-flash` started returning 404 "no longer available to new users"). The primary and fallback models therefore live in `.env`, not in the code, and any 404 from the primary model triggers the fallback. If both start failing with 404, check the current model list in Google AI Studio.
+Model IDs are retired over time, so the primary and fallback models live in `.env`, not in the code, and any 404 from the primary model triggers the fallback.

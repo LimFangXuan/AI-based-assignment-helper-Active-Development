@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+{% set page_title = "Next 6 days" %}
+{% set page_desc = "What is planned after today, day by day. Plan ahead or get started early." %}
+{% set crumbs = [("Next 6 days", None)] %}
+{% set crumb_icon = "ph-calendar-dots" %}
+{% block under_heading %}
+<div class="project-meta">
+  <span class="tag"><i class="ph ph-list-checks"></i>{{ total }} task{{ 's' if total != 1 }}</span>
+  <span class="tag"><i class="ph ph-timer"></i>About {{ minutes | minutes_label }}</span>
+</div>
+{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="card reveal" aria-label="Tasks by day">
+  <div class="day-rows">
+    {% for d in days %}
+      {% set items = by_day[d] %}
+      <div class="day-row {% if d.weekday() >= 5 %}is-weekend{% endif %}">
+        <div class="day-num"><strong>{{ d.day }}</strong><span>{{ 'Tomorrow' if loop.first else d.strftime('%a') }}</span></div>
+        <div>
+          {% if items %}
+            <ul class="task-list" data-task-list data-mode="agenda">
+              {% for task in items %}{% with agenda=True, hide_date=True %}{% include "components/task_row.html" %}{% endwith %}{% endfor %}
+            </ul>
+          {% else %}
+            <div class="day-empty">{{ 'Weekend.' if d.weekday() >= 5 else 'No tasks.' }}</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

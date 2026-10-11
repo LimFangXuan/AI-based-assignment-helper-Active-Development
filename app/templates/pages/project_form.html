@@ -1,0 +1,70 @@
+{% extends "layout.html" %}
+{% set page_title = "Edit project" if editing else "Create project" %}
+{% set page_desc = "Changes to the description or guideline can make earlier tool results out of date." if editing
+                   else "The description and guideline are what every tool reads, so the more specific, the better." %}
+{% if editing %}
+  {% set crumbs = [("Overview", url_for('overview.index')), (editing.name, url_for('projects.detail', project_id=editing.id)), ("Edit", None)] %}
+{% else %}
+  {% set crumbs = [("Overview", url_for('overview.index')), ("Create project", None)] %}
+{% endif %}
+{% set crumb_icon = "ph-pencil-simple" if editing else "ph-plus" %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<form method="POST" class="card reveal">
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="form-grid">
+    <div class="full">
+      <label for="name" style="margin-top:0;">Project name</label>
+      <input type="text" id="name" name="name" maxlength="{{ name_max }}" value="{{ values.name or '' }}" required
+             placeholder="e.g. Data Structures Assignment 2" {% if not editing %}autofocus{% endif %}>
+    </div>
+    <div class="full">
+      <label for="deadline">Deadline</label>
+      <input type="datetime-local" id="deadline" name="deadline" value="{{ values.deadline or '' }}" required style="max-width:280px;">
+    </div>
+    <div class="full">
+      <label for="description">Description</label>
+      <p class="field-hint">Describe the task itself: the topic, your ideas, or how your lecturer explained it.<br>
+        Rules and marking criteria go in the field below.</p>
+      <textarea id="description" name="description" rows="9" maxlength="{{ description_max }}" data-count required>{{ values.description or '' }}</textarea>
+    </div>
+    <div class="full">
+      <label for="guideline">Guideline / Marking rubric <span class="opt">(optional)</span></label>
+      <p class="field-hint">Paste the marking rubric, format rules, word limits and any restrictions.</p>
+      <textarea id="guideline" name="guideline" rows="6" maxlength="{{ guideline_max }}" data-count>{{ values.guideline or '' }}</textarea>
+    </div>
+    <div>
+      <label for="type">Type</label>
+      <select id="type" name="type" required>
+        {% for group, items in TYPE_GROUPS %}
+          <optgroup label="{{ group }}">
+            {% for slug, label in items %}<option value="{{ slug }}" {% if values.type == slug %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="citation_style">Citation style <span class="opt">(optional)</span></label>
+      <select id="citation_style" name="citation_style">
+        <option value="">Not sure yet</option>
+        {% for slug, label in CITATION_STYLES.items() %}<option value="{{ slug }}" {% if values.citation_style == slug %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="full">
+      <label id="mode-label">Individual or group</label>
+      <div class="segmented" role="radiogroup" aria-labelledby="mode-label">
+        {% for slug, label in WORK_MODES.items() %}
+          <label><input type="radio" name="work_mode" value="{{ slug }}" {% if values.work_mode == slug %}checked{% endif %} required>
+            <span><i class="ph {{ 'ph-user' if slug == 'individual' else 'ph-users-three' }}"></i>{{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <p class="field-hint" style="margin-top:22px;"><i class="ph ph-lock-simple"></i> Emails and phone numbers are hidden before anything is sent to the AI. Don't enter addresses or ID numbers.</p>
+  <div class="btn-row" style="margin-top:12px;">
+    <button class="btn" type="submit"><i class="ph ph-check"></i>{{ "Save changes" if editing else "Create project" }}</button>
+    <a class="btn ghost" href="{{ url_for('projects.detail', project_id=editing.id) if editing else url_for('overview.index') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

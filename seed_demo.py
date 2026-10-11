@@ -4,37 +4,55 @@
 """
 from datetime import date, datetime, timedelta
 
-from app import Project, Task, User, app, db
+from app import create_app
+from app.extensions import db
+from app.models import Project, Task, User
+
+app = create_app()
 
 DEMO_USER, DEMO_PASSWORD = "demo", "demo1234"
 
+# (名称, 距今天数, 状态, 类型, 个人/小组, 描述, guideline, [(步骤, 距今天数, 分钟, 已完成)])
 PROJECTS = [
-    ("数据结构 Assignment 2：哈希表", 5, "in_progress",
-     "用 C++ 实现一个支持动态扩容的哈希表，对比线性探测和链地址法的性能，并写 1000 字报告。",
-     [("读题，列出评分标准里的每一项", 0, 20, True), ("写出哈希表的接口和测试用例", 0, 60, False),
-      ("实现线性探测版本", 1, 90, False), ("实现链地址法版本", 2, 90, False),
-      ("跑性能对比并画图", 3, 60, False), ("写报告并检查格式", 4, 120, False)]),
-    ("市场营销小组报告", 9, "not_started",
-     "4 人小组，分析一个本地品牌的社交媒体策略，3000 字报告 + 10 分钟展示。",
-     [("和组员确定品牌和分工", 0, 30, False), ("收集品牌近三个月的帖子数据", 2, 90, False),
-      ("写自己负责的竞品分析部分", 5, 120, False), ("合并报告，做展示幻灯片", 7, 120, False)]),
-    ("微积分作业 5", -1, "in_progress", "第 7 章习题 1 到 20 题。",
-     [("做 1 到 10 题", -2, 60, True), ("做 11 到 20 题", -1, 60, False)]),
-    ("毕业设计开题报告", 30, "not_started", "", []),
+    ("Data Structures Assignment 2: Hash Tables", 5, "in_progress", "software_development", "individual",
+     "Implement a resizable hash table in C++ and compare linear probing with separate chaining. "
+     "Write a 1,000-word report on the results.",
+     "Marks: implementation 50%, performance analysis 30%, report 20%. Use only the C++ standard library.",
+     [("Read the brief and list every marking criterion", 0, 20, True),
+      ("Write the hash table interface and test cases", 0, 60, False),
+      ("Implement the linear probing version", 1, 90, False),
+      ("Implement the separate chaining version", 2, 90, False),
+      ("Run the benchmarks and plot the results", 3, 60, False),
+      ("Write the report and check the format", 4, 120, False)]),
+    ("Marketing group report", 9, "not_started", "report", "group",
+     "Analyse a local brand's social media strategy: a 3,000-word report plus a 10-minute presentation.",
+     "",
+     [("Agree on the brand and split the work", 0, 30, False),
+      ("Collect the brand's posts from the last three months", 2, 90, False),
+      ("Write my competitor analysis section", 5, 120, False),
+      ("Merge the report and build the slides", 7, 120, False)]),
+    ("Calculus problem set 5", -1, "in_progress", "exam_preparation", "individual",
+     "Chapter 7 exercises 1 to 20.", "",
+     [("Do questions 1 to 10", -2, 60, True), ("Do questions 11 to 20", -1, 60, False)]),
+    ("Final year project proposal", 30, "not_started", "research_proposal", "individual",
+     "Proposal for an app that helps students plan assignments.", "", []),
+    ("Database design coursework", 12, "done", "system_database_design", "group",
+     "Design and normalise a database for a library system.", "", []),
 ]
 
 with app.app_context():
     if User.query.filter_by(username=DEMO_USER).first():
-        print(f"账号 {DEMO_USER} 已存在，跳过。")
+        print(f"User {DEMO_USER} already exists, skipping.")
     else:
         user = User(username=DEMO_USER)
         user.set_password(DEMO_PASSWORD)
         db.session.add(user)
         db.session.flush()
         today = date.today()
-        for name, days, status, desc, tasks in PROJECTS:
+        for name, days, status, ptype, mode, desc, guideline, tasks in PROJECTS:
             deadline = datetime.combine(today + timedelta(days=days), datetime.min.time()).replace(hour=23, minute=59)
-            project = Project(user_id=user.id, name=name, deadline=deadline, status=status, description=desc)
+            project = Project(user_id=user.id, name=name, deadline=deadline, status=status, type=ptype,
+                              work_mode=mode, description=desc, guideline=guideline)
             db.session.add(project)
             db.session.flush()
             for i, (title, offset, minutes, done) in enumerate(tasks):
@@ -42,4 +60,4 @@ with app.app_context():
                                     minutes=minutes, done=done, position=i,
                                     done_at=datetime.now() if done else None))
         db.session.commit()
-        print(f"已创建示例账号 {DEMO_USER} / {DEMO_PASSWORD} 和 {len(PROJECTS)} 个项目。")
+        print(f"Created demo user {DEMO_USER} / {DEMO_PASSWORD} with {len(PROJECTS)} projects.")

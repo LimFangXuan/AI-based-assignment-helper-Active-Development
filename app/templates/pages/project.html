@@ -1,0 +1,78 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import status, deadline_tag with context %}
+{% set page_title = project.name %}
+{% set crumbs = [("Overview" if project.status != 'submitted' else "Submitted", url_for('overview.index') if project.status != 'submitted' else url_for('projects.submitted')), (project.name, None)] %}
+{% set crumb_icon = "ph-folder-simple" %}
+{% block heading %}<strong>{{ project.name }}</strong>{% endblock %}
+{% block under_heading %}
+<div class="project-meta">
+  {% if project.status in editable %}
+    <form method="POST" action="{{ url_for('projects.update_status', project_id=project.id) }}" style="margin:0;display:flex;gap:6px;align-items:center;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <span class="dot {{ project.status }}" aria-hidden="true"></span>
+      <label for="status" class="sr-only">Status</label>
+      <select id="status" name="status" class="status-select" data-autosubmit>
+        {% for s in editable %}<option value="{{ s }}" {% if project.status == s %}selected{% endif %}>{{ STATUS_LABELS[s] }}</option>{% endfor %}
+      </select>
+      <button class="btn secondary small" type="submit">Update</button>
+    </form>
+  {% else %}
+    {{ status(project.status) }}
+  {% endif %}
+  {{ deadline_tag(project) }}
+  <span class="muted small mono {% if project.is_overdue %}overdue-text{% endif %}">Due {{ project.deadline.strftime('%d %b %Y, %H:%M') }}</span>
+  <span class="tag">{{ TYPE_LABELS.get(project.type, 'Other') }}</span>
+  <span class="tag">{{ WORK_MODES.get(project.work_mode, 'Individual') }}</span>
+  {% if project.citation_style %}<span class="tag">{{ CITATION_STYLES[project.citation_style] }}</span>{% endif %}
+</div>
+{% endblock %}
+{% block header_actions %}
+<a class="btn outline small" href="{{ url_for('projects.edit', project_id=project.id) }}"><i class="ph ph-pencil-simple"></i>Edit</a>
+{% if project.status != 'submitted' %}
+<form method="POST" action="{{ url_for('projects.submit', project_id=project.id) }}" style="margin:0;"
+      data-confirm="It will leave Overview, the calendar and the sidebar. You can still open it from Submitted and move it back."
+      data-confirm-title="Mark “{{ project.name }}” as submitted?" data-confirm-ok="Mark as submitted">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn small" type="submit"><i class="ph ph-paper-plane-tilt"></i>Submit</button>
+</form>
+{% else %}
+<form method="POST" action="{{ url_for('projects.update_status', project_id=project.id) }}" style="margin:0;">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="status" value="in_progress">
+  <button class="btn small secondary" type="submit"><i class="ph ph-arrow-counter-clockwise"></i>Move back to In progress</button>
+</form>
+{% endif %}
+<div class="menu" data-menu>
+  <button class="icon-btn" type="button" data-menu-btn aria-haspopup="true" aria-expanded="false" aria-label="More actions"><i class="ph ph-dots-three-outline"></i></button>
+  <div class="menu-pop" role="menu" hidden>
+    <form method="POST" action="{{ url_for('projects.delete', project_id=project.id) }}"
+          data-confirm="The project, its tasks, prompts and papers will be permanently deleted. This can't be undone."
+          data-confirm-title="Delete “{{ project.name }}”?" data-confirm-ok="Delete forever" data-danger="1">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="menu-item danger" role="menuitem" type="submit"><i class="ph ph-trash"></i>Delete project</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block content %}
+<section aria-labelledby="tools-h">
+  <div class="module-head"><h2 id="tools-h">Tools</h2><span class="muted small">Each tool builds on the ones above it.</span></div>
+  <div class="tool-chain reveal">
+    {% for c in cards %}
+      {% set t = c.tool %}
+      <a class="tool-card {{ c.state }}" href="{{ url_for(t.endpoint, project_id=project.id) }}" {% if c.state == 'soon' %}aria-label="{{ t.name }} (coming soon)"{% endif %}>
+        <span class="tool-icon"><i class="ph {{ t.icon }}"></i><span class="step">{{ loop.index }}</span></span>
+        <div style="min-width:0;">
+          <h3>{{ t.name }} {% if c.state == 'soon' %}<span class="tag" style="margin-left:6px;">Soon</span>{% endif %}</h3>
+          <p class="desc">{{ t.description }}</p>
+          {% if c.state != 'soon' %}
+            <div class="state">{% if c.state == 'done' %}<i class="ph ph-check-circle" style="color:var(--green)"></i>{% elif c.state == 'active' %}<i class="ph ph-circle-half"></i>{% else %}<i class="ph ph-circle-dashed"></i>{% endif %}{{ c.meta }}</div>
+          {% endif %}
+          {% if c.hint and c.state == 'todo' %}<div class="hint"><i class="ph ph-info"></i>{{ c.hint }}</div>{% endif %}
+        </div>
+        <span class="btn secondary small go">{{ 'Preview' if c.state == 'soon' else 'Open' }}</span>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

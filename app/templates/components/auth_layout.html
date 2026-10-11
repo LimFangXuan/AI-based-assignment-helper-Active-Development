@@ -1,0 +1,43 @@
+{# 登录和注册共用的左右分栏布局。需要变量：mode = 'login' | 'register' #}
+<main class="auth">
+  <aside class="auth-side">
+    <a class="logo" href="{{ url_for('auth.login') }}">
+      <span class="logo-mark"><i class="ph-fill ph-check-square-offset"></i></span>
+      <span class="logo-name">Assignment Helper</span>
+    </a>
+    <div>
+      <h1>Know exactly what to do, then get it done on time.</h1>
+      <p>Clarify the brief, generate a solid prompt, and split the work into daily tasks that fit before your deadline.</p>
+      <ul class="auth-points">
+        <li style="--i:0"><i class="ph ph-list-checks"></i>Requirements first, so nothing is guessed</li>
+        <li style="--i:1"><i class="ph ph-calendar-check"></i>Daily tasks planned around your deadline</li>
+        <li style="--i:2"><i class="ph ph-books"></i>Real papers only, never invented references</li>
+      </ul>
+    </div>
+    <span></span>
+  </aside>
+  <section class="auth-form">
+    <div class="inner reveal">
+      <h2>{{ 'Welcome back' if mode == 'login' else 'Create your account' }}</h2>
+      <p class="muted">{{ 'Log in to continue with your assignments.' if mode == 'login' else 'Just a username and a password. No email needed.' }}</p>
+      <form method="POST">
+        {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="username">Username{% if mode == 'register' %} <span class="opt">(3 to 80 characters)</span>{% endif %}</label>
+        <input type="text" id="username" name="username" value="{{ username or '' }}" autocomplete="username" required autofocus>
+        <label for="password">Password{% if mode == 'register' %} <span class="opt">(at least 6 characters)</span>{% endif %}</label>
+        <div class="pw-wrap">
+          <input type="password" id="password" name="password" required
+                 autocomplete="{{ 'current-password' if mode == 'login' else 'new-password' }}" {% if mode == 'register' %}minlength="6"{% endif %}>
+          <button class="icon-btn" type="button" data-pw-toggle aria-label="Show password"><i class="ph ph-eye"></i></button>
+        </div>
+        <p style="margin-top:22px;"><button class="btn block" type="submit">{{ 'Log in' if mode == 'login' else 'Create account' }}<i class="ph ph-arrow-right"></i></button></p>
+      </form>
+      {% if mode == 'login' %}
+        <p class="muted">No account yet? <a class="link" href="{{ url_for('auth.register') }}">Create one</a></p>
+      {% else %}
+        <p class="muted">Already have an account? <a class="link" href="{{ url_for('auth.login') }}">Log in</a></p>
+      {% endif %}
+    </div>
+  </section>
+</main>

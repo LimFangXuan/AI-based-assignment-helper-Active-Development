@@ -1,0 +1,81 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import status, status_ring, deadline_tag with context %}
+{% set page_title = "Overview" %}
+{% set page_desc = "Where every unsubmitted project stands, and what needs your attention next." %}
+{% set crumbs = [("Overview", None)] %}
+{% set crumb_icon = "ph-house" %}
+{% block header_actions %}<a class="btn" href="{{ url_for('projects.new') }}"><i class="ph ph-plus"></i>Create project</a>{% endblock %}
+{% block content %}
+<div class="reveal">
+  <section class="card module" aria-labelledby="progress-h">
+    <div class="module-head"><h2 id="progress-h">Progress</h2></div>
+    {% if projects %}
+      <div class="progress-module">
+        {{ status_ring(counts) }}
+        <div class="legend">
+          {% for key in ['not_started', 'in_progress', 'done'] %}
+            <div class="legend-row">
+              <span class="dot {{ key }}" aria-hidden="true"></span>
+              <span>{{ STATUS_LABELS[key] }}</span>
+              <span class="n">{{ counts[key] }}</span>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="stat-list">
+          <a class="stat-link" href="{{ url_for('overview.today') }}"><span class="v">{{ today_count }}</span><span>Tasks for today</span><i class="ph ph-arrow-right"></i></a>
+          <a class="stat-link" href="{{ url_for('overview.upcoming') }}"><span class="v">{{ upcoming_count }}</span><span>Tasks in the next 6 days</span><i class="ph ph-arrow-right"></i></a>
+          <div class="stat-link"><span class="v">{{ done_today }}</span><span>Done today</span><span></span></div>
+        </div>
+      </div>
+    {% else %}
+      <div class="empty">
+        <i class="ph ph-chart-donut"></i>
+        <strong>Nothing to track yet</strong>
+        Create a project and its progress will show up here.
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="module" id="projects" aria-labelledby="projects-h" style="margin-top:28px;">
+    <div class="module-head">
+      <h2 id="projects-h">Projects <span class="count">{{ projects | length }}</span></h2>
+      {% if projects %}
+        <div class="chips" data-filters="project-cards" role="group" aria-label="Filter by status">
+          <button class="chip active" type="button" data-filter="all" aria-pressed="true">All</button>
+          {% for key in ['not_started', 'in_progress', 'done'] %}
+            <button class="chip" type="button" data-filter="{{ key }}" aria-pressed="false">{{ STATUS_LABELS[key] }}<span class="n">{{ counts[key] }}</span></button>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    <div class="project-cards" id="project-cards">
+      {% for p in projects %}
+        {% set prog = p.progress %}
+        <article class="project-card" data-status="{{ p.status }}">
+          {{ status(p.status) }}
+          <div style="min-width:0;">
+            <a class="name" href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.name }}</a>
+            <div class="sub">
+              <span>{{ TYPE_LABELS.get(p.type, 'Other') }}</span>
+              {% if prog[1] %}<span>{{ prog[0] }} / {{ prog[1] }} tasks done</span>{% endif %}
+            </div>
+          </div>
+          <div class="when {% if p.is_overdue %}overdue-text{% endif %}">
+            {{ p | countdown }}
+            <span class="mono">{{ p.deadline.strftime('%d %b %Y, %H:%M') }}</span>
+          </div>
+          <a class="btn secondary small open" href="{{ url_for('projects.detail', project_id=p.id) }}">Open</a>
+        </article>
+      {% else %}
+        <div class="card empty">
+          <i class="ph ph-notebook"></i>
+          <strong>No active projects</strong>
+          Add your first assignment to start planning it.
+          <div class="btn-row"><a class="btn" href="{{ url_for('projects.new') }}"><i class="ph ph-plus"></i>Create project</a></div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="empty" data-filter-empty hidden>No projects with this status.</div>
+  </section>
+</div>
+{% endblock %}

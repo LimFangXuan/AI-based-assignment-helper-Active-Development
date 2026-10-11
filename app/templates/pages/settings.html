@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% set page_title = "Settings" %}
+{% set page_desc = "Appearance and account." %}
+{% set crumbs = [("Settings", None)] %}
+{% set crumb_icon = "ph-gear-six" %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<div class="reveal">
+  <section class="card" aria-labelledby="appearance-h">
+    <h2 id="appearance-h">Appearance</h2>
+    <p class="muted small" style="margin:4px 0 14px;">Saved in this browser only.</p>
+    <div class="segmented" role="radiogroup" aria-label="Theme" data-theme-choice>
+      <label><input type="radio" name="theme" value="system"><span><i class="ph ph-desktop"></i>System</span></label>
+      <label><input type="radio" name="theme" value="light"><span><i class="ph ph-sun"></i>Light</span></label>
+      <label><input type="radio" name="theme" value="dark"><span><i class="ph ph-moon"></i>Dark</span></label>
+    </div>
+  </section>
+  <section class="card" aria-labelledby="account-h">
+    <h2 id="account-h">Account</h2>
+    <p class="muted" style="margin:6px 0 16px;">Signed in as <strong style="color:var(--text)">{{ g.user.username }}</strong>.</p>
+    <form method="POST" action="{{ url_for('auth.logout') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="btn outline" type="submit"><i class="ph ph-sign-out"></i>Log out</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+{% set page_title = "A few questions first" %}
+{% set page_desc = "Pick an option or write your own answer. Not sure? Choose “don't know” and the AI will suggest an approach, marked [Recommended]." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, url_for('prompt.index', project_id=project.id)), ("Questions", None)] %}
+{% set crumb_icon = tool.icon %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+{% set current = 1 %}{% include "components/stepper.html" %}
+{% include "components/diagnosis.html" %}
+<form method="POST" action="{{ url_for('prompt.answers', project_id=project.id, session_id=ps.id) }}" style="margin-top:18px;"
+      data-ai="Reading your answers|Separating confirmed, recommended and assumed|Designing a prompt for this project">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <section class="card">
+    {% for q in ps.questions %}
+      {% set i = loop.index0 %}
+      <div class="question">
+        <div class="q">{{ loop.index }}. {{ q.question }}</div>
+        {% if q.why %}<div class="why">Why this matters: {{ q.why }}</div>{% endif %}
+        <div class="options" role="radiogroup" aria-label="{{ q.question }}">
+          {% for opt in q.options %}
+            <label class="option"><input type="radio" name="q{{ i }}" value="{{ opt }}"><span>{{ opt }}</span></label>
+          {% endfor %}
+        </div>
+        <input type="text" name="q{{ i }}_text" maxlength="500" placeholder="Or write your own answer (used instead of the option)" aria-label="Your own answer">
+      </div>
+    {% endfor %}
+  </section>
+  <div class="btn-row" style="margin-top:18px;">
+    <button class="btn" type="submit"><i class="ph ph-sparkle"></i>Send answers</button>
+    <span class="muted small">The AI needs a few seconds.</span>
+  </div>
+</form>
+{% endblock %}

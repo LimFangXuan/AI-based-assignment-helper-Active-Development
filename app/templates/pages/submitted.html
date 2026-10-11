@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% set page_title = "Submitted" %}
+{% set page_desc = "Projects you have handed in. Everything is kept, and you can move one back to In progress." %}
+{% set crumbs = [("Submitted", None)] %}
+{% set crumb_icon = "ph-archive" %}
+{% block content %}
+<div class="project-cards reveal">
+  {% for p in projects %}
+    {% set prog = p.progress %}
+    <article class="project-card" data-status="submitted">
+      <span class="status"><span class="dot submitted" aria-hidden="true"></span>Submitted</span>
+      <div style="min-width:0;">
+        <a class="name" href="{{ url_for('projects.detail', project_id=p.id) }}">{{ p.name }}</a>
+        <div class="sub"><span>{{ TYPE_LABELS.get(p.type, 'Other') }}</span>{% if prog[1] %}<span>{{ prog[0] }} / {{ prog[1] }} tasks done</span>{% endif %}</div>
+      </div>
+      <div class="when">Deadline<span class="mono">{{ p.deadline.strftime('%d %b %Y, %H:%M') }}</span></div>
+      <a class="btn secondary small open" href="{{ url_for('projects.detail', project_id=p.id) }}">Open</a>
+    </article>
+  {% else %}
+    <div class="card empty"><i class="ph ph-archive"></i><strong>Nothing submitted yet</strong>Press “Submit” on a project once you have handed it in.</div>
+  {% endfor %}
+</div>
+{% endblock %}

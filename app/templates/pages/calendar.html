@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{% set page_title = "Calendar" %}
+{% set page_desc = "Deadlines of your unsubmitted projects, month by month." %}
+{% set crumbs = [("Calendar", None)] %}
+{% set crumb_icon = "ph-calendar-blank" %}
+{% block header_actions %}
+<a class="btn outline small pill" href="{{ url_for('calendar.month') }}">Today</a>
+{% endblock %}
+{% block content %}
+<section class="card reveal" aria-labelledby="cal-h">
+  <div class="cal-head">
+    <h2 id="cal-h">{{ first.strftime('%B %Y') }} <span class="count">{{ total }} deadline{{ 's' if total != 1 }}</span></h2>
+    <div class="btn-row">
+      <a class="icon-btn" href="{{ url_for('calendar.month', month=prev_month.strftime('%Y-%m')) }}" aria-label="Previous month"><i class="ph ph-caret-left"></i></a>
+      <a class="icon-btn" href="{{ url_for('calendar.month', month=next_month.strftime('%Y-%m')) }}" aria-label="Next month"><i class="ph ph-caret-right"></i></a>
+    </div>
+  </div>
+  <nav class="month-strip" aria-label="Months of {{ first.year }}">
+    {% for m in months %}
+      <a class="chip {% if m.month == first.month %}active{% endif %}" href="{{ url_for('calendar.month', month=m.strftime('%Y-%m')) }}"
+         {% if m.month == first.month %}aria-current="page"{% endif %}>{{ m.strftime('%b') }}</a>
+    {% endfor %}
+  </nav>
+  <div class="cal-grid" role="grid" aria-label="{{ first.strftime('%B %Y') }}">
+    {% for dow in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}<div class="cal-dow" role="columnheader">{{ dow }}</div>{% endfor %}
+    {% for week in weeks %}
+      {% for d in week %}
+        {% set items = by_day.get(d, []) if d.month == first.month else [] %}
+        <div class="cal-cell {% if d.month != first.month %}out{% endif %} {% if items %}has-items{% endif %} {% if d == today %}is-today{% endif %}" role="gridcell"
+             {% if d == today %}aria-current="date"{% endif %}>
+          <span class="cal-day">{{ d.day }}</span>
+          {% for p in items %}
+            <a class="cal-item {% if loop.index > cell_limit %}extra{% endif %}" href="{{ url_for('projects.detail', project_id=p.id) }}"
+               title="{{ p.name }}: {{ STATUS_LABELS[p.status] }}, due {{ p.deadline.strftime('%H:%M') }}">
+              <span class="dot {{ p.status }}" aria-hidden="true"></span><span class="name">{{ p.name }}</span>
+            </a>
+          {% endfor %}
+          {% if items | length > cell_limit %}
+            <button class="cal-more" type="button" data-cal-more aria-expanded="false">+{{ items | length - cell_limit }} more</button>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

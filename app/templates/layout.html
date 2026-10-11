@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% if page_title %}{{ page_title }} · {% endif %}Assignment Helper</title>
+  <script>
+    // 在页面渲染前套用主题和侧栏折叠状态，避免闪一下
+    try {
+      var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t;
+      if (localStorage.getItem("sidebar") === "collapsed") document.documentElement.classList.add("sidebar-collapsed");
+    } catch (e) {}
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% block body %}
+  <div class="shell">
+    {% include "components/sidebar.html" %}
+    <div class="scrim" data-sidebar-close></div>
+    <main class="main">
+      <div class="topbar">
+        <button class="icon-btn menu-toggle" type="button" data-sidebar-open aria-label="Open menu"><i class="ph ph-list"></i></button>
+        <nav class="crumbs" aria-label="Breadcrumb">
+          {% for label, href in crumbs or [] %}
+            {% if not loop.first %}<i class="ph ph-caret-right sep" aria-hidden="true"></i>{% endif %}
+            {% if href and not loop.last %}<a href="{{ href }}">{{ label }}</a>
+            {% else %}<span class="current" {% if loop.last %}aria-current="page"{% endif %}>{% if loop.last and crumb_icon %}<i class="ph {{ crumb_icon }}"></i>{% endif %}{{ label }}</span>{% endif %}
+          {% endfor %}
+        </nav>
+      </div>
+      <div class="page {% block page_class %}{% endblock %}">
+        <header class="page-head reveal">
+          <div>
+            <h1>{% block heading %}{{ page_title }}{% endblock %}</h1>
+            {% if page_desc %}<p class="desc">{{ page_desc }}</p>{% endif %}
+            {% block under_heading %}{% endblock %}
+          </div>
+          <div class="actions">{% block header_actions %}{% endblock %}</div>
+        </header>
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+{% endblock %}
+
+  {% include "components/toasts.html" %}
+  {% include "components/dialogs.html" %}
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>

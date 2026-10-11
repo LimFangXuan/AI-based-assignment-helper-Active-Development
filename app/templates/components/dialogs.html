@@ -1,0 +1,24 @@
+{# 确认弹窗（替代浏览器自带的 confirm）和 AI 等待弹窗，由 app.js 控制 #}
+<dialog id="confirm-dialog">
+  <form method="dialog">
+    <div class="dialog-body">
+      <div class="dialog-icon"><i class="ph ph-warning"></i></div>
+      <h2 data-c-title>Are you sure?</h2>
+      <p class="muted" data-c-text></p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn secondary" value="cancel">Cancel</button>
+      <button class="btn" value="ok" data-c-ok>Confirm</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ai-dialog" class="ai-wait" aria-label="The AI is working">
+  <div class="dialog-body">
+    <div class="ai-orb"><i class="ph-fill ph-sparkle"></i></div>
+    <h2>The AI is working</h2>
+    <p class="ai-status" aria-live="polite"></p>
+    <div class="skeleton"><span></span><span></span><span></span><span></span></div>
+    <p class="muted small" style="margin:16px 0 0;">This usually takes 5 to 20 seconds. Please keep this page open.</p>
+  </div>
+</dialog>

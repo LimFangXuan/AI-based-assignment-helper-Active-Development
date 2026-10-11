@@ -1,0 +1,44 @@
+{# 状态：圆点 + 文字（不只靠颜色区分） #}
+{% macro status(value) -%}
+<span class="status"><span class="dot {{ value }}" aria-hidden="true"></span>{{ STATUS_LABELS[value] }}</span>
+{%- endmacro %}
+
+{# 截止时间标签：逾期红色，3 天内黄色 #}
+{% macro deadline_tag(project) -%}
+{% if project.status == 'submitted' %}<span class="tag"><i class="ph ph-check-circle"></i>Submitted</span>
+{% elif project.is_overdue %}<span class="tag overdue"><i class="ph ph-warning-circle"></i>{{ project | countdown }}</span>
+{% elif project.days_left <= 3 and project.status != 'done' %}<span class="tag soon"><i class="ph ph-hourglass-medium"></i>{{ project | countdown }}</span>
+{% else %}<span class="tag"><i class="ph ph-calendar-blank"></i>{{ project | countdown }}</span>{% endif %}
+{%- endmacro %}
+
+{# Overview 的三段状态环。pathLength=100，所以每段的长度就是百分比；段与段之间留一点空隙 #}
+{% macro status_ring(counts) -%}
+{% set total = counts.values() | sum %}
+<div class="status-ring" role="img" aria-label="{{ total }} active projects: {% for k, n in counts.items() %}{{ n }} {{ STATUS_LABELS[k] | lower }}{{ ', ' if not loop.last }}{% endfor %}">
+  <svg viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="track" cx="60" cy="60" r="50" pathLength="100"></circle>
+    {% if total %}
+      {% set ns = namespace(offset=0) %}
+      {% set parts = counts.items() | selectattr(1) | list %}
+      {% set gap = 3 if parts | length > 1 else 0 %}
+      {% for key, n in parts %}
+        {% set length = n * 100 / total %}
+        <circle class="seg {{ key }}" cx="60" cy="60" r="50" pathLength="100"
+                stroke-dasharray="{{ '%.2f' % [length - gap, 0.5] | max }} {{ '%.2f' % (100 - [length - gap, 0.5] | max) }}"
+                stroke-dashoffset="{{ '%.2f' % (-ns.offset - gap / 2) }}" style="animation-delay: {{ loop.index0 * 120 }}ms"></circle>
+        {% set ns.offset = ns.offset + length %}
+      {% endfor %}
+    {% endif %}
+  </svg>
+  <div class="center"><strong>{{ total }}</strong><span>active</span></div>
+</div>
+{%- endmacro %}
+
+{# 工具页的副标题：属于哪个项目 #}
+{% macro project_line(project) -%}
+<div class="project-meta">
+  {{ status(project.status) }}
+  {{ deadline_tag(project) }}
+  <span class="tag">{{ TYPE_LABELS.get(project.type, 'Other') }}</span>
+</div>
+{%- endmacro %}

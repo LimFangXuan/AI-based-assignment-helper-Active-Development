@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+{% from "components/macros.html" import project_line with context %}
+{% set page_title = tool.name %}
+{% set page_desc = "Daily tasks that fit before the deadline. Tick them off here or from Today." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, None)] %}
+{% set crumb_icon = tool.icon %}
+{% set prog = project.progress %}
+{% block under_heading %}{{ project_line(project) }}{% endblock %}
+{% block header_actions %}
+<form method="POST" action="{{ url_for('planner.draft', project_id=project.id) }}" style="margin:0;"
+      data-ai="Reading the description and guideline|Breaking the work into small tasks|Spreading them out before the deadline">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn {{ 'secondary' if project.tasks }}" type="submit"><i class="ph ph-magic-wand"></i>{{ 'Plan more with AI' if project.tasks else 'Plan with AI' }}</button>
+</form>
+{% endblock %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+<section class="card reveal" aria-labelledby="tasks-h">
+  <div class="module-head" style="margin-bottom:10px;">
+    <h2 id="tasks-h">Tasks</h2>
+    <span class="muted small" data-progress-text>{% if prog[1] %}{{ prog[0] }} / {{ prog[1] }} tasks done{% else %}No tasks yet{% endif %}</span>
+  </div>
+  <div class="bar" style="--pct: {{ prog[2] }}; margin-bottom:12px;" data-progress-line><span></span></div>
+
+  <ul class="task-list" id="task-list" data-task-list data-reorder-url="{{ url_for('planner.task_reorder', project_id=project.id) }}">
+    {% for task in project.tasks %}{% include "components/task_row.html" %}{% endfor %}
+  </ul>
+  <div class="empty" data-task-empty {% if project.tasks %}hidden{% endif %}>
+    <i class="ph ph-stack"></i>
+    <strong>No tasks yet</strong>
+    Use “Plan with AI” to get a draft you can edit, or add tasks yourself below.
+  </div>
+
+  <form class="composer" method="POST" action="{{ url_for('planner.task_add', project_id=project.id) }}" data-composer="task-list">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label class="sr-only" for="new-title">New task</label>
+    <input class="title-input" id="new-title" type="text" name="title" maxlength="200" required placeholder="Add a task and press Enter">
+    <label class="sr-only" for="new-due">Date</label>
+    <input id="new-due" type="date" name="due_date" value="{{ today.isoformat() }}" {% if project.days_left >= 0 %}max="{{ project.deadline.date().isoformat() }}"{% endif %}>
+    <label class="sr-only" for="new-min">Estimated minutes</label>
+    <input id="new-min" type="number" name="minutes" min="5" max="600" step="5" placeholder="Minutes">
+    <button class="btn small" type="submit"><i class="ph ph-plus"></i>Add</button>
+  </form>
+  <p class="muted small" style="margin:12px 0 0;">Ticking tasks updates the project status: the first tick sets it to In progress, the last one to Ready to submit.</p>
+</section>
+{% endblock %}

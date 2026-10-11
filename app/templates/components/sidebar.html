@@ -1,0 +1,62 @@
+{# 左侧栏。数据来自 template_helpers.sidebar_context（登录后才有，只查一次数据库） #}
+{% set ep = request.endpoint %}
+{% set current_project_id = (request.view_args or {}).get('project_id') %}
+<aside class="sidebar" id="sidebar" aria-label="Main navigation">
+  <div class="side-head">
+    <a class="logo" href="{{ url_for('overview.index') }}">
+      <span class="logo-mark"><i class="ph-fill ph-check-square-offset"></i></span>
+      <span class="logo-name">Assignment Helper</span>
+    </a>
+    <button class="icon-btn collapse-btn" type="button" data-sidebar-collapse aria-label="Collapse sidebar" title="Collapse sidebar"><i class="ph ph-sidebar-simple"></i></button>
+  </div>
+
+  <a class="btn btn-create" href="{{ url_for('projects.new') }}" title="Create project"><i class="ph ph-plus"></i><span>Create project</span></a>
+
+  <div class="side-label">Main menu</div>
+  <nav class="side-nav">
+    {% set items = [
+      ('overview.index', 'ph-house', 'Overview', overview_badge),
+      ('overview.today', 'ph-sun-horizon', 'Today', 0),
+      ('overview.upcoming', 'ph-calendar-dots', 'Next 6 days', 0),
+      ('calendar.month', 'ph-calendar-blank', 'Calendar', 0),
+      ('projects.submitted', 'ph-archive', 'Submitted', 0),
+    ] %}
+    {% for endpoint, icon, label, badge in items %}
+      <a class="side-link {% if ep == endpoint %}active{% endif %} {% if badge %}has-badge{% endif %}" href="{{ url_for(endpoint) }}" title="{{ label }}"
+         {% if ep == endpoint %}aria-current="page"{% endif %}>
+        <i class="ph {{ icon }}"></i><span class="label">{{ label }}</span>
+        {% if badge %}<span class="side-badge" title="{{ badge }} project(s) overdue or due within 3 days">{{ badge }}</span>{% endif %}
+      </a>
+    {% endfor %}
+  </nav>
+
+  <div class="side-label">Projects</div>
+  <nav class="side-nav">
+    {% for p in sidebar_projects %}
+      <a class="side-link side-project {% if current_project_id == p.id %}active{% endif %}" href="{{ url_for('projects.detail', project_id=p.id) }}" title="{{ p.name }} ({{ STATUS_LABELS[p.status] }})">
+        <span class="dot {{ p.status }}" aria-hidden="true"></span><span class="label">{{ p.name }}</span>
+        <span class="sr-only">{{ STATUS_LABELS[p.status] }}</span>
+      </a>
+    {% else %}
+      <span class="side-more">No active projects</span>
+    {% endfor %}
+    {% if sidebar_more %}<a class="side-more" href="{{ url_for('overview.index') }}#projects">+{{ sidebar_more }} more</a>{% endif %}
+  </nav>
+
+  <div class="side-foot">
+    <a class="side-link {% if ep == 'auth.settings' %}active{% endif %}" href="{{ url_for('auth.settings') }}" title="Settings"><i class="ph ph-gear-six"></i><span class="label">Settings</span></a>
+    <div class="menu" data-menu>
+      <button class="account" type="button" data-menu-btn aria-haspopup="true" aria-expanded="false">
+        <span class="avatar">{{ g.user.username[:1] }}</span>
+        <span class="who"><strong>{{ g.user.username }}</strong><span>Student</span></span>
+      </button>
+      <div class="menu-pop up" role="menu" hidden>
+        <a class="menu-item" role="menuitem" href="{{ url_for('auth.settings') }}"><i class="ph ph-gear-six"></i>Settings</a>
+        <form method="POST" action="{{ url_for('auth.logout') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button class="menu-item" role="menuitem" type="submit"><i class="ph ph-sign-out"></i>Log out</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</aside>

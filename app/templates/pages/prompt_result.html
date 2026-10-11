@@ -1,0 +1,29 @@
+{% extends "layout.html" %}
+{% set page_title = "Your prompt is ready" %}
+{% set page_desc = "Check the [Assumed] parts before pasting it into any AI chat, and fix anything that's wrong directly in the text." %}
+{% set crumbs = [("Overview", url_for('overview.index')), (project.name, url_for('projects.detail', project_id=project.id)), (tool.name, url_for('prompt.index', project_id=project.id)), ("Prompt", None)] %}
+{% set crumb_icon = tool.icon %}
+{% block page_class %}narrow{% endblock %}
+{% block content %}
+{% set current = 3 %}{% include "components/stepper.html" %}
+{% if ps.content_fingerprint and ps.content_fingerprint != project.fingerprint %}
+  <div class="notice"><i class="ph ph-info"></i><span>Details changed since this was created. Update? Start a new prompt below to use the latest description and guideline.</span></div>
+{% endif %}
+<section class="card">
+  <div class="module-head">
+    <h2>Copy-ready prompt</h2>
+    <button class="btn small" type="button" data-copy="final-prompt"><i class="ph ph-copy"></i>Copy</button>
+  </div>
+  <textarea class="prompt" id="final-prompt" readonly aria-label="Generated prompt">{{ ps.final_prompt }}</textarea>
+</section>
+
+{% set s = ps.summary %}
+<div style="margin-top:18px;">{% include "components/summary.html" %}</div>
+
+<form method="POST" action="{{ url_for('prompt.new', project_id=project.id) }}" class="btn-row" style="margin-top:18px;"
+      data-ai="Checking whether the task is feasible|Preparing a few key questions">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <button class="btn secondary" type="submit"><i class="ph ph-arrows-clockwise"></i>Start a new prompt</button>
+  <a class="btn ghost" href="{{ url_for('projects.detail', project_id=project.id) }}">Back to project</a>
+</form>
+{% endblock %}

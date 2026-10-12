@@ -63,7 +63,7 @@ CSRF tokens on every POST, ownership checks that return 404 for other users' rec
 - Stream section drafts token by token.
 - Evaluate the prompts on a fixed set of real (anonymised) briefs, so prompt changes are measured and not just eyeballed.
 
-## 5. Reading the code (about 20 minutes)
+## 5. The code
 
 Read in this order. Each step builds on the one before.
 
@@ -78,26 +78,3 @@ Read in this order. Each step builds on the one before.
 7. **[`app/reminders.py`](../app/reminders.py)**: `run()` → `process_digest` / `process_deadlines`, and `already_sent` / `record` (why a reminder is never sent twice).
 8. **[`app/blueprints/demo.py`](../app/blueprints/demo.py)** + [`app/services/demo_ai.py`](../app/services/demo_ai.py): how demo mode closes routes and answers offline.
 9. **[`test_app.py`](../test_app.py)**: skim `fake_generate` and `ready_project` at the top, then section 12 (demo mode), which ends by asserting that no network connection was opened.
-
-## 6. Questions I expect, with short answers
-
-**Why Flask and not Django or a JS framework?**
-I wanted to understand every layer. Flask plus server-rendered templates kept the whole app in one language and one process, with no build step, and every route is testable with the test client.
-
-**How do you stop the AI from making things up?**
-I don't rely on the prompt alone. Anything checkable is checked in code: quotes must exist in the source text, dates are clamped, paper IDs must come from the retrieved set, and citation markers must match stored papers. Anything that can't be checked is labelled as an assumption.
-
-**What happens when Gemini is down or slow?**
-Every call has a timeout. 5xx errors are retried, then the fallback model is tried. If everything fails, the user gets a plain message, nothing half-written is stored, and they can retry.
-
-**How is user data protected?**
-Passwords are salted hashes, every POST needs a CSRF token, and records are looked up through ownership checks. Emails and phone numbers are masked before text reaches the AI (the database keeps the original). Users can export or delete everything from Settings.
-
-**How did you test it without spending API quota?**
-A fake AI keyed on task markers, `httpx.MockTransport` for OpenAlex and Google, a fake SMTP server, and a stubbed push service. All 504 checks run offline in a few minutes.
-
-**What would break first with 1,000 users?**
-Synchronous AI calls holding request threads, SQLite write locking, and in-memory login throttling. Those are the first three items in "What I'd do next".
-
-**Why is there a demo mode?**
-So anyone can try the full flow without API keys, and without their typing being sent to a third party. It also forced a cleaner design: because each outside service already had a single entry point, switching all of them off took a few lines.
